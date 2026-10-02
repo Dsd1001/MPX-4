@@ -99,7 +99,7 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     ├── README.md
     ├── SPECIFICATION.md
     ├── STATE-MACHINES.md
-├── REGISTRIES.md
+    ├── REGISTRIES.md
     ├── SECURITY.md
     ├── CHANGELOG.md
     ├── CONTRIBUTING.md
@@ -111,14 +111,15 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     ├── examples/
     │   ├── handshake.md
     │   ├── frames.md
-    │   └── reliability.md
+    │   ├── reliability.md
+    │   └── terminal-lifecycle.md
     ├── test-vectors/
     │   ├── README.md
     │   ├── varint.json
     │   ├── frame-encoding.json
     │   ├── key-schedule.json
     │   ├── secure-record.json
-│   └── state-validity.json
+    │   └── state-validity.json
     └── .github/
         ├── ISSUE_TEMPLATE/
         └── pull_request_template.md
