@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 01",
+  "revision": "Draft 02",
   "direction": "client_to_server",
   "sequence_number": "0",
   "inputs": {
