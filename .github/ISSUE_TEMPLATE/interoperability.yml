@@ -1,0 +1,33 @@
+name: Interoperability issue
+description: Report a wire-level mismatch between independent MPX/4 implementations.
+title: "[interop] "
+labels: []
+body:
+  - type: input
+    id: revision
+    attributes:
+      label: Protocol revision
+      placeholder: "Draft 00"
+    validations:
+      required: true
+  - type: textarea
+    id: implementations
+    attributes:
+      label: Implementations
+      description: Identify the independent implementations and versions involved.
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Observed wire behavior
+      description: Include decoded Frames, hexadecimal data, or test-vector differences when available.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Cite the relevant specification text.
+    validations:
+      required: true
