@@ -211,3 +211,16 @@ Detailed tombstones may be compacted only after the conditions in STATE-MACHINES
 A compact retired identity MUST never be promoted back into a live Stream.
 
 State compaction MUST NOT refund or recreate Session credit.
+
+
+## TCP binding security
+
+The Draft 03 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+
+Every TCP Carrier performs the full MPX authentication handshake.
+
+A replacement TCP connection derives fresh traffic keys and starts new Secure Record sequence spaces. Partial Secure Records from a failed TCP connection are discarded and are never continued on the replacement connection.
+
+Bare TCP EOF, reset, or half-close MUST NOT be interpreted as authenticated MPX Stream, Carrier, or Session terminal state.
+
+Implementations SHOULD validate declared Secure Record length before allocating receive storage, particularly when input arrives incrementally over TCP.
