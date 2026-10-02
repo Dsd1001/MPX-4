@@ -6,9 +6,9 @@ This document describes security requirements and operational guidance for MPX/4
 
 Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 02 security profile
+## Draft 03 security profile
 
-The mandatory-to-implement Draft 02 profile uses:
+The mandatory-to-implement Draft 03 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -43,7 +43,7 @@ A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 02 profile does not provide forward secrecy.
+The mandatory Draft 03 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -74,7 +74,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 02 uses a per-direction Record Sequence Number beginning at zero.
+Draft 03 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -82,7 +82,7 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 02 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 03 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -102,7 +102,7 @@ Retransmission and reinjection repeat the same Transmission ID. If the same Tran
 
 ## Stream-data integrity
 
-Draft 02 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 03 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -180,8 +180,8 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 02 key derivation and Finished authentication;
-- Draft 02 Secure Record encryption.
+- Draft 03 key derivation and Finished authentication;
+- Draft 03 Secure Record encryption.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
 
