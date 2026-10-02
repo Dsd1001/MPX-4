@@ -21,6 +21,8 @@ It provides:
 - [Normative State Machines and Frame Validity](STATE-MACHINES.md)
 - [MPX/4 over TCP](bindings/tcp.md)
 - [Interoperability Profile](INTEROPERABILITY.md)
+- [MPX/4 over TCP](bindings/tcp.md)
+- [Interoperability Profile](INTEROPERABILITY.md)
 - [Protocol Registries](REGISTRIES.md)
 - [Security Policy and Guidance](SECURITY.md)
 - [Specification Changelog](CHANGELOG.md)
@@ -57,6 +59,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Retransmission and reinjection example](examples/reliability.md)
 - [Terminal Stream lifecycle example](examples/terminal-lifecycle.md)
 - [TCP Carrier example](examples/tcp-carrier.md)
+- [TCP Carrier example](examples/tcp-carrier.md)
 
 ### Test vectors
 
@@ -66,6 +69,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Key schedule and Finished vector](test-vectors/key-schedule.json)
 - [Secure Record vector](test-vectors/secure-record.json)
 - [State validity cases](test-vectors/state-validity.json)
+- [TCP binding framing cases](test-vectors/tcp-binding.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
 Test vectors are intended to let independent implementations verify identical wire encodings and cryptographic derivations.
