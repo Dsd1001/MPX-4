@@ -19,6 +19,10 @@ Identify affected Sections, Frames, Parameters, Error Codes, Scheduler IDs, or t
 
 Describe how existing and independent implementations are expected to behave.
 
+## State-machine impact
+
+Describe any change to Session, Carrier, Stream, Transmission, terminal, tombstone, or late-Frame behavior. Update `STATE-MACHINES.md` and `test-vectors/state-validity.json` when applicable.
+
 ## Security considerations
 
 Describe any effect on authentication, confidentiality, integrity, replay handling, resource usage, or downgrade behavior.
@@ -28,4 +32,5 @@ Describe any effect on authentication, confidentiality, integrity, replay handli
 - [ ] Registry assignments are updated when required.
 - [ ] CHANGELOG.md is updated for normative wire or state-machine changes.
 - [ ] Test vectors are added or updated when wire encoding changes.
+- [ ] State-machine cases are updated when lifecycle behavior changes.
 - [ ] Normative MUST/SHOULD/MAY language is intentional.
