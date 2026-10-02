@@ -62,6 +62,8 @@ Extensions MUST NOT silently reinterpret existing Core fields.
 
 Changes to wire encoding SHOULD include machine-readable test vectors when practical.
 
+Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD update [STATE-MACHINES.md](STATE-MACHINES.md) and `test-vectors/state-validity.json` when the affected behavior can be expressed as a conformance case.
+
 Test vectors SHOULD include both:
 
 - valid encodings that independent implementations can reproduce; and
