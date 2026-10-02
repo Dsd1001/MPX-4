@@ -1,145 +1,172 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative example of an MPX/4 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 01 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
 ## 1. Initial Carrier
 
-Assume a Client creates a new Session over a TCP Carrier.
+Assume a Client creates a new Session over a reliable ordered byte-stream Carrier.
 
-The connection begins with:
+    Client                                             Server
+      |                                                   |
+      |  Connection Preface                              |
+      |  Magic = 4d 50 58 00                             |
+      |  Version = 4                                     |
+      |-------------------------------------------------->|
+      |                                                   |
+      |  CLIENT_INIT                                      |
+      |-------------------------------------------------->|
+      |                                                   |
+      |  SERVER_INIT                                      |
+      |<--------------------------------------------------|
+      |                                                   |
+      |  CLIENT_FINISHED                                  |
+      |-------------------------------------------------->|
+      |                                                   |
+      |  SERVER_FINISHED                                  |
+      |<--------------------------------------------------|
+      |                                                   |
+      |================ ESTABLISHED ======================|
+      |                                                   |
+      |  SESSION_CREDIT                                   |
+      |<------------------------------------------------->|
+      |                                                   |
 
-```text
-Client                                             Server
-  |                                                   |
-  |  Connection Preface                              |
-  |  Magic = 4d 50 58 00                             |
-  |  Version = 4                                     |
-  |-------------------------------------------------->|
-  |                                                   |
-  |  CLIENT_INIT                                      |
-  |-------------------------------------------------->|
-  |                                                   |
-  |  SERVER_INIT                                      |
-  |<--------------------------------------------------|
-  |                                                   |
-  |  CLIENT_FINISHED                                  |
-  |-------------------------------------------------->|
-  |                                                   |
-  |  SERVER_FINISHED                                  |
-  |<--------------------------------------------------|
-  |                                                   |
-  |================ ESTABLISHED ======================|
-```
+No application-data credit is implicit. Each endpoint advertises Session credit explicitly after the first Carrier becomes established.
 
 ## 2. CLIENT_INIT
 
-Illustrative logical Parameters:
+Illustrative logical Parameters, shown in mandatory increasing Parameter-Type order:
 
-```text
-SESSION_ID
-  = 4a5f0c0a1fcb4d72a89a7a4f574d9d21
+    SESSION_ID
+      = 4a5f0c0a1fcb4d72a89a7a4f574d9d21
 
-SESSION_ACTION
-  = CREATE
+    SESSION_ACTION
+      = CREATE
 
-CARRIER_ID
-  = 1
+    CARRIER_ID
+      = 1
 
-CARRIER_GENERATION
-  = 0
+    CARRIER_GENERATION
+      = 0
 
-CLIENT_NONCE
-  = 32 fresh random octets
+    CLIENT_NONCE
+      = 32 fresh random octets
 
-MAX_FRAME_PAYLOAD
-  = 32768
+    MAX_FRAME_PAYLOAD
+      = 32768
 
-MAX_RECORD_SIZE
-  = 65536
+    MAX_RECORD_SIZE
+      = 65536
 
-MAX_STREAMS
-  = 2048
+    MAX_STREAMS
+      = 2048
 
-INITIAL_STREAM_CREDIT
-  = implementation-selected value
+    SCHEDULER
+      = AGGREGATE
 
-INITIAL_SESSION_CREDIT
-  = implementation-selected value
+MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are Client receive limits. They constrain traffic sent by the Server.
 
-SCHEDULER
-  = AGGREGATE
-```
-
-The Parameter order shown here is illustrative. An implementation MUST follow the ordering rules, if any, defined by the active protocol revision.
+If SCHEDULER were WEIGHTED, CLIENT_INIT would additionally contain PATH_CAPACITY for this Carrier.
 
 ## 3. SERVER_INIT
 
-The Server validates the requested Session creation and responds with Parameters including:
+The Server validates the requested Session policy and returns its own receive limits:
 
-```text
-SERVER_NONCE
-  = 32 fresh random octets
+    SERVER_NONCE
+      = 32 fresh random octets
 
-MAX_FRAME_PAYLOAD
-  = selected compatible value
+    MAX_FRAME_PAYLOAD
+      = 32768
 
-MAX_RECORD_SIZE
-  = selected compatible value
+    MAX_RECORD_SIZE
+      = 65536
 
-MAX_STREAMS
-  = selected compatible value
+    MAX_STREAMS
+      = 2048
 
-SCHEDULER
-  = selected compatible scheduler
-```
+    SCHEDULER
+      = AGGREGATE
 
-The exact encoded CLIENT_INIT and SERVER_INIT bytes, together with the Connection Preface, form the authenticated handshake transcript.
+The Server echoes the accepted Session Scheduler.
 
-## 4. Finished messages
+The Server receive limits constrain traffic sent by the Client. The two endpoints are allowed to advertise different receive limits.
 
-The peers derive distinct finished keys and application traffic keys from the transport key and authenticated transcript.
+## 4. Finished authentication
 
-CLIENT_FINISHED authenticates the Client view of the transcript.
+The exact encoded bytes of:
 
-SERVER_FINISHED authenticates the Server view of the transcript.
+    Connection Preface
+    CLIENT_INIT
+    SERVER_INIT
 
-The Carrier enters ESTABLISHED only after the required Finished values validate.
+produce transcript hash H0.
 
-## 5. Additional Carrier
+CLIENT_FINISHED contains the Draft 01 HMAC-SHA256 VerifyData over H0.
 
-A second Carrier joins the same Session with:
+SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
-```text
-SESSION_ID
-  = 4a5f0c0a1fcb4d72a89a7a4f574d9d21
+After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-SESSION_ACTION
-  = JOIN
+The exact Draft 01 derivation is defined in Section 10 of the Core specification.
 
-CARRIER_ID
-  = 2
+A complete machine-readable example is available in:
 
-CARRIER_GENERATION
-  = 0
+- [key-schedule.json](../test-vectors/key-schedule.json)
 
-CLIENT_NONCE
-  = new 32-octet random value
-```
+## 5. Opening a Stream
 
-It performs a complete authenticated Carrier handshake before becoming eligible for scheduling.
+After Session establishment, the Client can send:
 
-## 6. Carrier reconnection
+    STREAM_OPEN
+      Stream ID        = 1
+      Transmission ID  = 1
+
+The Server either returns STREAM_OPEN_OK or STREAM_OPEN_REJECT with the same Stream ID and Transmission ID.
+
+Application data in either direction still requires explicit Stream credit.
+
+An accepting Server advertises STREAM_CREDIT for its receive direction.
+
+After receiving STREAM_OPEN_OK, the Client advertises STREAM_CREDIT for its own receive direction before expecting Server application data.
+
+## 6. Additional Carrier
+
+A second Carrier joins the same Session with a fresh authenticated handshake:
+
+    SESSION_ID
+      = same Session ID
+
+    SESSION_ACTION
+      = JOIN
+
+    CARRIER_ID
+      = 2
+
+    CARRIER_GENERATION
+      = 0
+
+    CLIENT_NONCE
+      = new 32-octet random value
+
+    SCHEDULER
+      = existing Session Scheduler
+
+Receive-limit Parameters are also sent for the new Carrier handshake.
+
+The Carrier is not eligible for scheduling until CLIENT_FINISHED has authenticated the Client and the full handshake reaches ESTABLISHED.
+
+## 7. Carrier reconnection
 
 If Carrier 2 later disconnects and is re-established:
 
-```text
-CARRIER_ID
-  = 2
+    CARRIER_ID
+      = 2
 
-CARRIER_GENERATION
-  = 1
-```
+    CARRIER_GENERATION
+      = 1
 
-The higher Generation distinguishes the new transport connection from stale state belonging to the previous Carrier instance.
+The higher Generation distinguishes the new transport instance from stale state belonging to the previous Carrier incarnation.
+
+A lower Generation is stale. A conflicting equal live Generation is rejected.
