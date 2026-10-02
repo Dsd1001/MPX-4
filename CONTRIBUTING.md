@@ -64,6 +64,8 @@ Changes to wire encoding SHOULD include machine-readable test vectors when pract
 
 Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD update [STATE-MACHINES.md](STATE-MACHINES.md) and `test-vectors/state-validity.json` when the affected behavior can be expressed as a conformance case.
 
+Changes to TCP transport mapping SHOULD update `bindings/tcp.md`, `test-vectors/tcp-binding.json`, and the relevant Mandatory group in [INTEROPERABILITY.md](INTEROPERABILITY.md).
+
 Test vectors SHOULD include both:
 
 - valid encodings that independent implementations can reproduce; and
