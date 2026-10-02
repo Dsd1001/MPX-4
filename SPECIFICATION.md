@@ -295,13 +295,11 @@ PATH_CAPACITY is Carrier-scoped and is supplied by the Client in each CLIENT_INI
 
 ### 8.10. Directional receive limits
 
-MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS describe the receive capability of the endpoint that sends them.
+The Client advertises receive limits in CLIENT_INIT and the Server advertises receive limits in SERVER_INIT. The two directions MAY use different values.
 
-The Client includes its receive limits in CLIENT_INIT.
+MAX_FRAME_PAYLOAD and MAX_STREAMS are Session-scoped directional receive limits. A JOIN handshake MUST repeat the values already established by that endpoint for the Session. A mismatch is a SESSION_CONFLICT.
 
-The Server includes its receive limits in SERVER_INIT.
-
-The limits are directional; the two endpoints MAY advertise different values.
+MAX_RECORD_SIZE is a Carrier-scoped directional receive limit and MAY differ between Carriers in the same Session.
 
 ## 9. Session creation and Carrier joining
 
