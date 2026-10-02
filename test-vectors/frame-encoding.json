@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 00",
+  "revision": "Draft 01",
   "representation": "decrypted Frame bytes before Secure Record encryption",
   "vectors": [
     {
@@ -46,6 +46,15 @@
       },
       "hex": "20088010000080800000",
       "length": 10
+    },
+    {
+      "name": "credit-probe-session",
+      "frame_type": "CREDIT_PROBE",
+      "fields": {
+        "stream_id": "0"
+      },
+      "hex": "210100",
+      "length": 3
     }
   ]
 }
