@@ -1,0 +1,112 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 03",
+  "binding": "TCP",
+  "purpose": "Byte-stream framing and transport-loss conformance",
+  "fixtures": {
+    "connection_preface_hex": "4d50580004",
+    "client_init_hex": "01405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101",
+    "secure_record_seq0_hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9",
+    "secure_record_seq1_hex": "000300b90cec9b2be63ff0594a681bfbea22502c19",
+    "secure_record_seq1_plaintext_hex": "010101",
+    "secure_record_seq1_meaning": "PING token=1"
+  },
+  "cases": [
+    {
+      "name": "preface-one-byte-fragments",
+      "input_chunks_hex": [
+        "4d",
+        "50",
+        "58",
+        "00",
+        "04"
+      ],
+      "expected_units": [
+        {
+          "type": "connection_preface",
+          "hex": "4d50580004"
+        }
+      ]
+    },
+    {
+      "name": "preface-coalesced-with-client-init",
+      "input_chunks_hex": [
+        "4d5058000401405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101"
+      ],
+      "expected_units": [
+        {
+          "type": "connection_preface",
+          "hex": "4d50580004"
+        },
+        {
+          "type": "handshake_message",
+          "name": "CLIENT_INIT",
+          "hex": "01405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101"
+        }
+      ]
+    },
+    {
+      "name": "secure-record-fragmented",
+      "input_chunks_hex": [
+        "00",
+        "0dd48ca4",
+        "d88424c813baa4",
+        "aeffbc7867966596e11781365723a7bbb248e9"
+      ],
+      "expected_units": [
+        {
+          "type": "secure_record",
+          "sequence_number": "0",
+          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+        }
+      ]
+    },
+    {
+      "name": "two-secure-records-coalesced",
+      "input_chunks_hex": [
+        "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9000300b90cec9b2be63ff0594a681bfbea22502c19"
+      ],
+      "expected_units": [
+        {
+          "type": "secure_record",
+          "sequence_number": "0",
+          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+        },
+        {
+          "type": "secure_record",
+          "sequence_number": "1",
+          "hex": "000300b90cec9b2be63ff0594a681bfbea22502c19"
+        }
+      ]
+    },
+    {
+      "name": "first-record-plus-partial-second",
+      "input_chunks_hex": [
+        "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9000300b9",
+        "0cec9b2be63ff0594a681bfbea22502c19"
+      ],
+      "expected_units": [
+        {
+          "type": "secure_record",
+          "sequence_number": "0",
+          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+        },
+        {
+          "type": "secure_record",
+          "sequence_number": "1",
+          "hex": "000300b90cec9b2be63ff0594a681bfbea22502c19"
+        }
+      ]
+    },
+    {
+      "name": "eof-mid-record",
+      "input_chunks_hex": [
+        "000dd48ca4d88424"
+      ],
+      "transport_event": "EOF",
+      "expected_units": [],
+      "expected_result": "carrier_lost",
+      "expected_sequence_advance": false
+    }
+  ]
+}
