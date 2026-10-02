@@ -218,7 +218,9 @@ After acceptance, each bidirectional Stream has independent send and receive dir
 
 After FIN_PENDING or RESET_PENDING begins, no new STREAM_DATA may be committed in that direction.
 
-Retransmitted copies of the terminal Frame retain the same Transmission ID.
+Retransmitted copies of the same terminal Frame retain the same Transmission ID.
+
+If STOP_SENDING is received while FIN is pending, the sender MUST stop scheduling new Attempts of the FIN Transmission and create a new RESET_STREAM Transmission with the same Final Offset and the STOP_SENDING Error Code. The RESET_STREAM supersedes the FIN for application-visible termination. A later acknowledgement of the superseded FIN is treated as a stale settled acknowledgement and MUST NOT settle or cancel the RESET_STREAM Transmission.
 
 ### 8.2. Receive direction
 
@@ -364,7 +366,9 @@ An implementation MAY retain additional state.
 
 ## 16. Tombstone entry conditions
 
-A Stream can leave active Stream state and enter TOMBSTONE only when:
+A rejected opening or pre-open cancellation can enter a lightweight opening tombstone without creating application Stream state. Such a tombstone retains the Stream ID, original open Transmission ID when known, the rejection/cancellation decision, and any terminal information needed to answer late duplicates.
+
+For an accepted Stream, the Stream can leave active Stream state and enter TOMBSTONE only when:
 
 1. its local sending direction has a final size and the local terminal Transmission has been acknowledged;
 2. its receive direction has an established terminal state;
