@@ -328,7 +328,7 @@ The first Carrier of a new Session SHOULD use Carrier ID 1 and Generation 0.
 
 The Server MUST NOT attach unauthenticated Carrier state to a live Session before validating CLIENT_FINISHED.
 
-A JOIN uses the same SESSION_ID, SESSION_ACTION=JOIN, a Carrier ID, Generation, fresh CLIENT_NONCE, receive limits, and the existing Session Scheduler.
+A JOIN uses the same SESSION_ID, SESSION_ACTION=JOIN, a Carrier ID, Generation, fresh CLIENT_NONCE, receive limits, and the existing Session Scheduler. Session-scoped receive limits MUST match the values already established for that endpoint; MAX_RECORD_SIZE MAY differ for the new Carrier.
 
 A higher accepted Generation supersedes any lower Generation for the same Carrier ID. A lower Generation is stale and MUST be rejected. An equal Generation that conflicts with an already accepted live Carrier MUST be rejected with CARRIER_CONFLICT.
 
