@@ -1,0 +1,51 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 00",
+  "representation": "decrypted Frame bytes before Secure Record encryption",
+  "vectors": [
+    {
+      "name": "stream-data-small",
+      "frame_type": "STREAM_DATA",
+      "fields": {
+        "stream_id": "1",
+        "offset": "32768",
+        "transmission_id": "7",
+        "data_utf8": "hello"
+      },
+      "hex": "130b01800080000768656c6c6f",
+      "length": 13
+    },
+    {
+      "name": "transmission-ack",
+      "frame_type": "TRANSMISSION_ACK",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "7",
+        "receiver_timestamp_us": "1234567"
+      },
+      "hex": "140601078012d687",
+      "length": 8
+    },
+    {
+      "name": "stream-credit",
+      "frame_type": "STREAM_CREDIT",
+      "fields": {
+        "stream_id": "1",
+        "consumed_offset": "65536",
+        "maximum_offset": "131072"
+      },
+      "hex": "1509018001000080020000",
+      "length": 11
+    },
+    {
+      "name": "session-credit",
+      "frame_type": "SESSION_CREDIT",
+      "fields": {
+        "consumed_bytes": "1048576",
+        "maximum_bytes": "8388608"
+      },
+      "hex": "20088010000080800000",
+      "length": 10
+    }
+  ]
+}
