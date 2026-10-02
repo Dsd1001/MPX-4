@@ -4,6 +4,48 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
 
+## Draft 02 — 2026-10-02
+
+Draft 02 is a state-machine and terminal-semantics revision. It does not change the Draft 01 cryptographic profile, Secure Record encoding, VarInt encoding, or Core Frame wire layouts.
+
+### Added
+
+- Normative [STATE-MACHINES.md](STATE-MACHINES.md).
+- Explicit Session and Carrier lifecycle states.
+- Separate Stream opening state and independent send/receive direction state machines.
+- Frame-validity matrices for opening, active, terminal, tombstone, and retired states.
+- Acceptance-evidence rules for cross-Carrier reordering around STREAM_OPEN_OK.
+- Pre-open RESET_STREAM and STOP_SENDING cancellation rules.
+- Explicit behavior for late DATA after FIN and RESET.
+- TRANSMISSION_ACK validity rules for outstanding, settled, compacted, and never-allocated Transmission IDs.
+- Tombstone entry conditions and minimum retained semantic state.
+- Retired Stream identity rules that prevent Stream-ID reuse without requiring full Stream state forever.
+- Deterministic state-error precedence.
+- Machine-readable state-validity cases.
+- Terminal Stream lifecycle example.
+
+### Registry changes
+
+- Added STREAM_STATE_ERROR at 0x0e.
+- Added FINAL_SIZE_ERROR at 0x0f.
+- Added TRANSMISSION_ID_ERROR at 0x10.
+
+### Clarified
+
+- A FIN establishes final size even when earlier DATA is still missing.
+- DATA below a FIN final size can arrive later and fill holes.
+- DATA arriving after RESET has no application delivery effect.
+- Terminal reliable Frames are retransmitted with the same Transmission ID.
+- A Stream ID remains permanently used after rejection or retirement.
+- Detailed tombstones can be compacted only after terminal reliability and receive accounting are settled.
+- Retired identities never recreate application Stream state.
+
+### Compatibility
+
+Draft 02 preserves the Draft 01 wire encodings for existing handshake messages, Secure Records, Parameters, and Frames.
+
+Implementations that follow Draft 01 wire encoding but not Draft 02 state rules can still fail interoperability under cross-Carrier reordering or late terminal traffic.
+
 ## Draft 01 — 2026-10-02
 
 Draft 01 is a precision and interoperability revision. It intentionally adds no new transport feature set.
