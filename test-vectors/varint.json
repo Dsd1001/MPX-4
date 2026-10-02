@@ -1,8 +1,8 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 00",
+  "revision": "Draft 01",
   "encoding": "MPX VarInt",
-  "note": "Hex strings are network-byte-order encodings. Encoders should use the shortest canonical width.",
+  "canonical_encoding": "Encoders MUST use the shortest width capable of representing the value. Receivers MUST reject non-canonical encodings.",
   "vectors": [
     {
       "value": "0",
@@ -45,6 +45,11 @@
       "length": 4
     },
     {
+      "value": "65536",
+      "hex": "80010000",
+      "length": 4
+    },
+    {
       "value": "1073741823",
       "hex": "bfffffff",
       "length": 4
@@ -72,6 +77,14 @@
     {
       "hex": "c0000000000000",
       "reason": "truncated 8-octet VarInt"
+    },
+    {
+      "hex": "4000",
+      "reason": "non-canonical encoding of value 0"
+    },
+    {
+      "hex": "80000040",
+      "reason": "non-canonical encoding of value 64"
     }
   ]
 }
