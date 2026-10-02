@@ -4,6 +4,59 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
 
+## Draft 03 — 2026-10-03
+
+Draft 03 adds the normative TCP transport binding and a common interoperability profile. It does not change the Draft 02 Core Frame layouts, Secure Record cryptography, Stream state semantics, or existing registry assignments.
+
+### Added
+
+- Normative [MPX/4 over TCP](bindings/tcp.md) transport binding.
+- [INTEROPERABILITY.md](INTEROPERABILITY.md) with Mandatory Core interoperability test groups.
+- TCP byte-stream parsing rules independent of TCP segment, write, and receive-call boundaries.
+- Explicit handling for incomplete handshake messages and partial Secure Records.
+- Carrier-loss and replacement behavior over TCP.
+- TCP half-close rules.
+- Graceful CARRIER_CLOSE and SESSION_CLOSE mapping to TCP teardown.
+- TCP_NODELAY and TCP keepalive operational guidance.
+- Lower-layer multipath interaction guidance.
+- TCP Carrier example.
+- Machine-readable TCP fragmentation, coalescing, and mid-record EOF vectors.
+
+### Clarified
+
+- One TCP connection maps to exactly one MPX Carrier.
+- Carrier identity is CARRIER_ID plus CARRIER_GENERATION, not the TCP four-tuple.
+- A replacement Carrier never resumes the failed Carrier's cryptographic record stream.
+- Replacement begins with a new handshake, fresh keys, and Record Sequence Number 0.
+- Bare TCP EOF is Carrier loss, not MPX graceful close.
+- TCP half-close does not substitute for any MPX Stream or Session terminal Frame.
+- MPX protocol size limits are independent of TCP MSS and path MTU.
+- MPX flow control does not replace TCP congestion control.
+- MPX/4 Draft 03 does not assign a well-known TCP port.
+
+### Interoperability
+
+Draft 03 defines Mandatory test groups for:
+
+- codec and framing;
+- handshake and cryptography;
+- single-Carrier Streams;
+- multi-Carrier Sessions;
+- retransmission and reinjection;
+- flow control;
+- terminal behavior;
+- opening reordering and cancellation;
+- tombstones and retired identities;
+- Carrier loss and replacement;
+- close behavior;
+- negative protocol tests.
+
+### Compatibility
+
+Draft 03 preserves Draft 02 Core wire encoding and state semantics.
+
+A Draft 02 implementation can generally advance to Draft 03 without changing its Core encoder or cryptographic vectors, but must satisfy the normative TCP binding when claiming TCP interoperability.
+
 ## Draft 02 — 2026-10-02
 
 Draft 02 is a state-machine and terminal-semantics revision. It does not change the Draft 01 cryptographic profile, Secure Record encoding, VarInt encoding, or Core Frame wire layouts.
