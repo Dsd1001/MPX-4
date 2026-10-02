@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 01
+**Registry Revision:** Draft 02
 
 This document records numeric assignments used by the MPX/4 Core Protocol.
 
@@ -110,7 +110,10 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x0b | SCHEDULER_MISMATCH | Scheduler policy incompatible |
 | 0x0c | CARRIER_CONFLICT | Carrier ID or Generation conflict |
 | 0x0d | UNSUPPORTED_PARAMETER | Unknown critical Parameter |
-| 0x0e–0x3f | — | Core-reserved |
+| 0x0e | STREAM_STATE_ERROR | Frame is impossible in the current Stream lifecycle state |
+| 0x0f | FINAL_SIZE_ERROR | Frame contradicts the established Stream final size |
+| 0x10 | TRANSMISSION_ID_ERROR | Transmission identity is conflicting or impossible |
+| 0x11–0x3f | — | Core-reserved |
 | 0x40–0x3fff | — | Extension |
 | 0x4000–0x7fff | — | Private Use |
 | 0x8000–2^62-1 | — | Reserved |
@@ -135,7 +138,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 01 |
+| 1–7 | RESERVED | MUST be zero in Draft 02 |
 
 ## 8. Registry stability
 
