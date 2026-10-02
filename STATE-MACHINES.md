@@ -158,7 +158,7 @@ After acceptance evidence has been observed, a later STREAM_OPEN_REJECT for that
 
 An implementation MAY internally transition to an equivalent "OPENING_WITH_ACCEPTANCE_EVIDENCE" state.
 
-A rejected opening is terminal. Once STREAM_OPEN_REJECT is processed, the Stream ID MUST NOT be reused. An implementation MAY represent the rejected Stream as a tombstone containing the original open Transmission ID, the rejection decision, and Error Code.
+A rejected opening is terminal. Once STREAM_OPEN_REJECT is processed, the Stream ID MUST NOT be reused. Duplicate STREAM_OPEN_REJECT carrying the same Stream ID, original open Transmission ID, and Error Code is idempotent. A conflicting rejection is STREAM_STATE_ERROR. An implementation MAY represent the rejected Stream as a tombstone containing the original open Transmission ID, the rejection decision, and Error Code.
 
 The Server MUST NOT send any acceptance-evidence Frame before it has accepted the Stream.
 
@@ -180,7 +180,7 @@ The Server:
 2. acknowledges the RESET_STREAM;
 3. MUST NOT later create an application Stream if STREAM_OPEN for the same Stream ID arrives.
 
-A later STREAM_OPEN for that ID is answered with STREAM_OPEN_REJECT.
+A later STREAM_OPEN for that ID is answered with STREAM_OPEN_REJECT using STREAM_STATE_ERROR.
 
 A pre-open RESET_STREAM with non-zero Final Offset is a STREAM_STATE_ERROR because application data could not legally have been committed before Stream acceptance.
 
@@ -188,9 +188,9 @@ A pre-open RESET_STREAM with non-zero Final Offset is a STREAM_STATE_ERROR becau
 
 STOP_SENDING MAY arrive before STREAM_OPEN.
 
-The Server records the receive-direction cancellation for that Stream ID and acknowledges the STOP_SENDING.
+The Server records the receive-direction cancellation for that Stream ID, acknowledges the STOP_SENDING, and sends RESET_STREAM with Final Offset 0 for its not-yet-started sending direction unless an equivalent RESET_STREAM is already pending.
 
-If STREAM_OPEN later arrives, the Stream MUST NOT become an ordinary accepted application Stream. The Server either rejects it or completes only the terminal exchange required to settle the already-cancelled Stream.
+If STREAM_OPEN later arrives, the Stream MUST NOT become an application Stream. The Server MUST answer with STREAM_OPEN_REJECT using STREAM_STATE_ERROR.
 
 ### 7.3. Other Frames before STREAM_OPEN
 
@@ -332,8 +332,10 @@ After establishment:
 1. the Final Offset never changes;
 2. STREAM_DATA End Offset MUST NOT exceed Final Offset;
 3. a repeated terminal Frame MUST use the same Final Offset;
-4. conflicting terminal kinds are allowed only when they do not imply contradictory byte semantics and the implementation can process them idempotently; otherwise the Session fails with FINAL_SIZE_ERROR;
-5. Final Offset contributes to Session committed-byte accounting exactly once.
+4. STREAM_FIN followed by RESET_STREAM with the same Final Offset is valid; RESET_STREAM becomes authoritative for application-visible termination;
+5. STREAM_FIN received after RESET_STREAM with the same Final Offset is acknowledged but MUST NOT replace reset semantics with graceful EOF;
+6. any terminal Frame with a different Final Offset fails with FINAL_SIZE_ERROR;
+7. Final Offset contributes to Session committed-byte accounting exactly once.
 
 If RESET_STREAM establishes a Final Offset greater than the highest received DATA End Offset, the missing range still counts as committed for Session flow-control accounting.
 
