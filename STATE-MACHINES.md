@@ -275,9 +275,9 @@ For an accepted Stream:
 |---|---:|---:|---:|---:|
 | STREAM_DATA within credit/final size | A | A; may fill holes | stale duplicate only | stale duplicate only |
 | STREAM_DATA beyond final size | n/a until final known | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR |
-| STREAM_FIN same Final Offset | A | D | D | FINAL_SIZE_ERROR if terminal kind/size conflicts |
+| STREAM_FIN same Final Offset | A | D | D | D; reset semantics remain authoritative |
 | STREAM_FIN different Final Offset | A if no final established | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR |
-| RESET_STREAM same Final Offset | A | valid only if consistent final size | valid only if consistent final size | D if same terminal semantics |
+| RESET_STREAM same Final Offset | A | A; reset semantics become authoritative | A; reset semantics become authoritative | D if same terminal semantics |
 | RESET_STREAM different Final Offset | A if no final established | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR | FINAL_SIZE_ERROR |
 | CREDIT_PROBE for Stream | A | A | A | A while tombstone retained |
 | STREAM_CONSUMED | pertains to opposite direction | pertains to opposite direction | pertains to opposite direction | pertains to opposite direction |
@@ -291,7 +291,7 @@ The following Frames describe peer state for the local sending direction:
 | Received Frame | SEND_ACTIVE | FIN_PENDING | RESET_PENDING | SEND_CLOSED |
 |---|---:|---:|---:|---:|
 | STREAM_CREDIT | A | A if values do not contradict final size | A if values do not contradict final size | validate then ignore |
-| STOP_SENDING | A; initiate RESET_STREAM if not terminal | A; MAY ignore or replace FIN with RESET only if implementation has not committed contradictory terminal semantics | D | D |
+| STOP_SENDING | A; send RESET_STREAM using the STOP_SENDING Error Code | A; send RESET_STREAM with the same Final Offset and make reset semantics authoritative | D; repeat pending RESET_STREAM as needed | D |
 | STREAM_CONSUMED | E before a final size is established | A only if Final Offset equals local final size | A only if Final Offset equals local final size | D if Final Offset matches |
 | TRANSMISSION_ACK | settle referenced pending Tx | settle referenced pending Tx | settle referenced pending Tx | ignore duplicate settled ACK |
 
@@ -392,7 +392,7 @@ After all conditions in Section 16 are satisfied and the implementation no longe
 
 A retired identity records at least that the Stream ID has been used and MUST NOT be reused.
 
-An implementation MAY represent retired identities as ranges, bitmaps, generation structures, or other compact data.
+An implementation MAY represent retired identities as ranges, bitmaps, generation structures, or other compact data. Tombstones and retired identities do not count toward the peer's MAX_STREAMS active-Stream limit.
 
 Frames received for a retired identity:
 
