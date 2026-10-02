@@ -1,30 +1,125 @@
 # MPX/4
 
-**MPX/4** is an application-layer multipath transport protocol for combining multiple authenticated carrier connections into a single session. It provides stream multiplexing, connection-level and stream-level flow control, carrier-aware scheduling, retransmission, and cross-carrier reinjection.
+**MPX/4** is an application-layer multipath transport protocol for combining multiple authenticated carrier connections into a single Session.
 
-## Specification
+It provides:
 
-- [MPX/4 Core Protocol Specification](SPECIFICATION.md)
-- [MPX/4 Protocol Registries](REGISTRIES.md)
+- authenticated multi-Carrier Sessions;
+- reliable ordered Streams;
+- stream and Session flow control;
+- Carrier-aware scheduling;
+- retransmission and cross-Carrier reinjection;
+- extensible typed Frames and negotiated protocol Parameters.
+
+## Current specification
+
+**Protocol version:** 4  
+**Specification revision:** Draft 00  
+**Status:** Working Draft
+
+- [Core Protocol Specification](SPECIFICATION.md)
+- [Protocol Registries](REGISTRIES.md)
+- [Security Policy and Security Guidance](SECURITY.md)
+- [Specification Changelog](CHANGELOG.md)
 
 ## Protocol model
 
-- **Session** — the end-to-end MPX association.
-- **Carrier** — one authenticated transport path belonging to a Session.
-- **Stream** — a reliable ordered byte stream multiplexed within a Session.
-- **Frame** — a typed protocol unit carried by the secure record layer.
-- **Scheduler** — the policy that assigns transmissions to available Carriers.
+```text
+Application
+    |
+    v
+MPX Streams
+    |
+    v
+MPX Session
+    |
+    +-- Carrier 1
+    +-- Carrier 2
+    +-- Carrier 3
+    `-- ...
+    |
+    v
+Secure Record Layer
+    |
+    v
+Transport Binding
+```
 
-## Scope
+The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when individual transmissions are scheduled, retransmitted, or reinjected across different Carriers.
 
-MPX/4 defines connection establishment and version negotiation, authenticated Session creation and Carrier joining, variable-length integer encoding, secure records, extensible typed Frames, Stream lifecycle, flow control, Carrier identity, path scheduling, retransmission, reinjection, error handling, and extension rules.
+## Interoperability material
 
-The initial transport binding is an ordered reliable byte stream such as TCP. Additional transport bindings can be specified independently.
+### Examples
 
-## Status
+- [Handshake walkthrough](examples/handshake.md)
+- [Frame encoding examples](examples/frames.md)
 
-This repository contains the working MPX/4 protocol specification. The wire format remains a draft until a stable protocol revision is declared.
+### Test vectors
+
+- [Test-vector overview](test-vectors/README.md)
+- [VarInt vectors](test-vectors/varint.json)
+- [Frame encoding vectors](test-vectors/frame-encoding.json)
+
+Test vectors are provided so independent implementations can verify identical wire encodings.
+
+## Extension points
+
+- [Protocol extensions](extensions/README.md)
+- [Transport bindings](bindings/README.md)
+
+Extensions are expected to define negotiation, scope, registry assignments, state transitions, error handling, interoperability behavior, and security considerations.
+
+## Registries
+
+MPX/4 maintains explicit numeric registries for:
+
+- Handshake Message Types;
+- Handshake Parameter Types;
+- Frame Types;
+- Error Codes;
+- Scheduler IDs.
+
+Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for specification-change requirements, registry-allocation rules, test-vector expectations, and extension guidance.
+
+Protocol clarification, extension proposal, and interoperability issue forms are available through GitHub Issues.
+
+Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
+
+## Repository layout
+
+```text
+.
+├── README.md
+├── SPECIFICATION.md
+├── REGISTRIES.md
+├── SECURITY.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── bindings/
+│   └── README.md
+├── extensions/
+│   └── README.md
+├── examples/
+│   ├── handshake.md
+│   └── frames.md
+├── test-vectors/
+│   ├── README.md
+│   ├── varint.json
+│   └── frame-encoding.json
+└── .github/
+    ├── ISSUE_TEMPLATE/
+    └── pull_request_template.md
+```
 
 ## Requirements language
 
 The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and **MAY** are to be interpreted as described by RFC 2119 and RFC 8174 when, and only when, they appear in all capitals.
+
+## License
+
+This repository is licensed under the [BSD 3-Clause License](LICENSE).
