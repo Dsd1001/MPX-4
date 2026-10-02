@@ -1,0 +1,77 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 00",
+  "encoding": "MPX VarInt",
+  "note": "Hex strings are network-byte-order encodings. Encoders should use the shortest canonical width.",
+  "vectors": [
+    {
+      "value": "0",
+      "hex": "00",
+      "length": 1
+    },
+    {
+      "value": "1",
+      "hex": "01",
+      "length": 1
+    },
+    {
+      "value": "63",
+      "hex": "3f",
+      "length": 1
+    },
+    {
+      "value": "64",
+      "hex": "4040",
+      "length": 2
+    },
+    {
+      "value": "15293",
+      "hex": "7bbd",
+      "length": 2
+    },
+    {
+      "value": "16383",
+      "hex": "7fff",
+      "length": 2
+    },
+    {
+      "value": "16384",
+      "hex": "80004000",
+      "length": 4
+    },
+    {
+      "value": "32768",
+      "hex": "80008000",
+      "length": 4
+    },
+    {
+      "value": "1073741823",
+      "hex": "bfffffff",
+      "length": 4
+    },
+    {
+      "value": "1073741824",
+      "hex": "c000000040000000",
+      "length": 8
+    },
+    {
+      "value": "4611686018427387903",
+      "hex": "ffffffffffffffff",
+      "length": 8
+    }
+  ],
+  "invalid": [
+    {
+      "hex": "40",
+      "reason": "truncated 2-octet VarInt"
+    },
+    {
+      "hex": "800000",
+      "reason": "truncated 4-octet VarInt"
+    },
+    {
+      "hex": "c0000000000000",
+      "reason": "truncated 8-octet VarInt"
+    }
+  ]
+}
