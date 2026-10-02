@@ -1,6 +1,6 @@
 # MPX/4 Frame Encoding Examples
 
-This document contains non-normative encoding examples for the MPX/4 Draft 00 Frame format.
+This document contains non-normative encoding examples for the MPX/4 Draft 01 Frame format.
 
 All hexadecimal examples use network byte order.
 
@@ -42,7 +42,7 @@ Complete decoded Frame representation:
 13 0b 01 80 00 80 00 07 68 65 6c 6c 6f
 ```
 
-This byte sequence is the plaintext Frame representation before placement into a Secure Record.
+This byte sequence is the plaintext Frame representation before placement into a Secure Record. Retransmission or reinjection of this Transmission keeps Transmission ID 7 and identical logical Frame contents.
 
 ## 2. TRANSMISSION_ACK
 
@@ -136,3 +136,16 @@ For example, the plaintext of one Secure Record might contain:
 Frame boundaries are recovered from each Frame's Type and Length fields.
 
 A Frame does not span Secure Record boundaries.
+
+
+## 6. CREDIT_PROBE
+
+A Session-only credit probe is encoded as:
+
+```text
+21 01 00
+```
+
+The Frame Type is 0x21, Frame Length is 1, and Stream ID is 0. A non-zero Stream ID requests current Stream credit for that Stream together with current Session credit.
+
+The Draft 01 Secure Record test vector encrypts the STREAM_DATA example above as the first Client-to-Server record.
