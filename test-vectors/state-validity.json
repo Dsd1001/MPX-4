@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 02",
+  "revision": "Draft 03",
   "document": "STATE-MACHINES.md",
   "cases": [
     {
@@ -42,7 +42,7 @@
       "frame": "STREAM_DATA",
       "expected": "session_error",
       "error": "STREAM_STATE_ERROR",
-      "notes": "Draft 02 has no implicit Stream data credit."
+      "notes": "Draft 03 has no implicit Stream data credit."
     },
     {
       "name": "zero-fin-overtakes-open-ok",
