@@ -26,5 +26,24 @@
     "client_traffic_iv_hex": "1f0cc87dcd985279eefbc191",
     "server_traffic_key_hex": "df82c7578fa2c774c7730f3704cc429beab04a61bb6723c0034fe517a974566d",
     "server_traffic_iv_hex": "1a4f47ec14b6f5c3673e9c8a"
+  },
+  "decoded_handshake": {
+    "session_id_hex": "00112233445566778899aabbccddeeff",
+    "session_action": "CREATE",
+    "carrier_id": "1",
+    "carrier_generation": "0",
+    "client_nonce_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "server_nonce_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "client_receive_limits": {
+      "max_frame_payload": "32768",
+      "max_record_size": "65536",
+      "max_streams": "2048"
+    },
+    "server_receive_limits": {
+      "max_frame_payload": "32768",
+      "max_record_size": "65536",
+      "max_streams": "2048"
+    },
+    "scheduler": "AGGREGATE"
   }
 }
