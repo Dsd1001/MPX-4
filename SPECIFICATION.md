@@ -55,7 +55,9 @@ The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **
 
 **Transmission** — One reliable MPX protocol unit identified by a Session-wide Transmission ID. Retransmission and reinjection repeat the same Transmission and retain its Transmission ID.
 
-**Attempt** — One concrete send of a Transmission on a Carrier. Attempts are local transport state and do not have a wire identifier.\n\n**Reinjection** — Sending another Attempt of an outstanding Transmission on a different Carrier.
+**Attempt** — One concrete send of a Transmission on a Carrier. Attempts are local transport state and do not have a wire identifier.
+
+**Reinjection** — Sending another Attempt of an outstanding Transmission on a different Carrier.
 
 **Frame** — A typed protocol message contained within a Secure Record.
 
