@@ -170,3 +170,8 @@ If Carrier 2 later disconnects and is re-established:
 The higher Generation distinguishes the new transport instance from stale state belonging to the previous Carrier incarnation.
 
 A lower Generation is stale. A conflicting equal live Generation is rejected.
+
+
+## Draft 01 notes
+
+Handshake Parameters are encoded in strictly increasing Parameter-Type order. MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are directional receive limits. No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.
