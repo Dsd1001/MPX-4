@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 01 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 02 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -103,13 +103,13 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 01 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 02 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 01 derivation is defined in Section 10 of the Core specification.
+The exact Draft 02 derivation is defined in Section 10 of the Core specification.
 
 A complete machine-readable example is available in:
 
@@ -172,6 +172,6 @@ The higher Generation distinguishes the new transport instance from stale state 
 A lower Generation is stale. A conflicting equal live Generation is rejected.
 
 
-## Draft 01 notes
+## Draft 02 notes
 
 Handshake Parameters are encoded in strictly increasing Parameter-Type order. MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are directional receive limits. No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.
