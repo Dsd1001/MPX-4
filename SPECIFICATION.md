@@ -1,7 +1,7 @@
 # MPX/4 Core Protocol Specification
 
 **Document:** MPX/4 Core Protocol  
-**Revision:** Draft 02  
+**Revision:** Draft 03  
 **Protocol Version:** 4  
 **Status:** Working Draft
 
@@ -92,19 +92,21 @@ Session state MUST survive the loss of an individual Carrier as long as at least
 
 Stream byte ordering is defined by Stream offsets, not Carrier order.
 
-## 4. Transport binding
+## 4. Transport bindings
 
-The initial MPX/4 transport binding is a reliable ordered byte stream.
+MPX/4 Core is defined independently of transport packet boundaries.
 
-For a TCP binding:
+A transport binding specifies how one MPX Carrier maps onto an underlying ordered transport, including connection establishment, byte-stream parsing, transport loss, replacement, and close behavior.
 
-- MPX MUST NOT depend on TCP segment boundaries.
-- Multiple MPX Secure Records MAY be written in one transport write.
-- One MPX Secure Record MAY require multiple transport reads.
-- An implementation SHOULD avoid buffering policies that create avoidable latency for small control Frames.
-- Path MTU and TCP MSS are properties of the underlying transport and are not MPX Frame-size limits.
+The normative baseline binding for Draft 03 is:
 
-The default maximum MPX Frame payload is 32768 bytes.
+- [MPX/4 over TCP](bindings/tcp.md)
+
+The TCP binding maps one TCP connection to one MPX Carrier and requires implementations to parse MPX independently of TCP segment, write, and receive-call boundaries.
+
+Additional transport bindings can be defined without changing the Session, Stream, Transmission, or Frame abstractions.
+
+The default maximum MPX Frame payload remains 32768 bytes.
 
 ## 5. Connection preface and version negotiation
 
@@ -188,7 +190,7 @@ Each handshake message is:
     Message Length      VarInt
     Message Body        Message Length octets
 
-Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 02.
+Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 03.
 
 ### 7.2. Parameter format
 
@@ -201,7 +203,7 @@ CLIENT_INIT and SERVER_INIT contain Parameters:
 
 Bit 0 of Flags is CRITICAL. Bits 1 through 7 are reserved and MUST be zero.
 
-Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 02.
+Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 03.
 
 An endpoint receiving an unknown Parameter with CRITICAL=0 MUST ignore its value after validating its encoded length.
 
@@ -228,7 +230,7 @@ CREATE establishes a new Session. JOIN attaches a new authenticated Carrier to a
 
 ### 8.3. CARRIER_ID and CARRIER_GENERATION
 
-CARRIER_ID is a VarInt in the range 1 through 8 in Draft 02.
+CARRIER_ID is a VarInt in the range 1 through 8 in Draft 03.
 
 CARRIER_GENERATION is a VarInt. The first transport instance of a Carrier ID uses Generation 0. A replacement transport for the same Carrier ID uses a strictly greater Generation.
 
@@ -246,7 +248,7 @@ SERVER_NONCE appears only in SERVER_INIT.
 
 MAX_FRAME_PAYLOAD is the maximum STREAM_DATA Data field, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 02 values are 1 through 32768.
+Valid Draft 03 values are 1 through 32768.
 
 A peer MUST NOT send a larger STREAM_DATA Data field.
 
@@ -254,7 +256,7 @@ A peer MUST NOT send a larger STREAM_DATA Data field.
 
 MAX_RECORD_SIZE is the maximum Secure Record plaintext length, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 02 values are 1024 through 65536.
+Valid Draft 03 values are 1024 through 65536.
 
 The record header and 16-octet AEAD tag are not included in this value.
 
@@ -264,7 +266,7 @@ A sender MUST ensure that each complete Frame fits within one Secure Record and 
 
 MAX_STREAMS is the maximum number of simultaneously active peer-initiated Streams that the sender of the Parameter is willing to maintain.
 
-Valid Draft 02 values are 1 through 2048.
+Valid Draft 03 values are 1 through 2048.
 
 Stream IDs are not bounded by MAX_STREAMS; the value limits concurrency.
 
@@ -336,7 +338,7 @@ A higher accepted Generation supersedes any lower Generation for the same Carrie
 
 ## 10. MPX/4 key schedule
 
-Draft 02 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
+Draft 03 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
 
 ### 10.1. MPX-Expand-Label
 
@@ -491,7 +493,7 @@ Wire format:
 
 ### 11.1. Record Flags
 
-Draft 02 defines no Record Flags.
+Draft 03 defines no Record Flags.
 
 Senders MUST transmit 0x00.
 
@@ -515,7 +517,7 @@ The sequence number increments by one after every successfully generated or auth
 
 The sequence number is not transmitted.
 
-Draft 02 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
+Draft 03 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
 
 ### 11.4. Nonce construction
 
@@ -560,7 +562,7 @@ Unknown Frame handling is determined by the registered range:
 - unknown values in the Core range 0x00 through 0x3f are a PROTOCOL_VIOLATION;
 - unknown values in the Extension range 0x40 through 0x3fff MUST be skipped by Frame Length unless a negotiated extension specifies stronger behavior;
 - values in the Private Use range 0x4000 through 0x7fff are valid only under an explicitly negotiated private profile;
-- all higher values are reserved and MUST be rejected in Draft 02.
+- all higher values are reserved and MUST be rejected in Draft 03.
 
 ### 12.2. PADDING
 
@@ -600,7 +602,7 @@ A duplicate of an already processed reliable Transmission MUST be processed idem
 
 ## 14. Stream identifiers and opening
 
-Draft 02 supports Client-initiated bidirectional Streams.
+Draft 03 supports Client-initiated bidirectional Streams.
 
 Client Stream IDs are positive odd integers allocated monotonically:
 
@@ -721,7 +723,7 @@ Consumed Offset and Maximum Offset MUST be monotonically non-decreasing.
 
 Maximum Offset MUST be greater than or equal to Consumed Offset.
 
-Draft 02 limits:
+Draft 03 limits:
 
     Maximum Offset - Consumed Offset <= 16 MiB
 
@@ -754,7 +756,7 @@ Both values MUST be monotonically non-decreasing.
 
 Maximum Bytes MUST be greater than or equal to Consumed Bytes.
 
-Draft 02 limits:
+Draft 03 limits:
 
     Maximum Bytes - Consumed Bytes <= 128 MiB
 
@@ -922,7 +924,7 @@ Carrier metrics are local implementation state unless explicitly exposed by an e
 
 The Session Scheduler selects a Carrier for each new Transmission and each later Attempt.
 
-Draft 02 Scheduler IDs are AUTO, AGGREGATE, PROTECT, and WEIGHTED.
+Draft 03 Scheduler IDs are AUTO, AGGREGATE, PROTECT, and WEIGHTED.
 
 The exact selection algorithm is implementation-defined unless a scheduler profile defines stronger interoperability requirements.
 
@@ -956,7 +958,7 @@ to estimate path behavior.
 
 A first-attempt STREAM_DATA acknowledgement returned on the same Carrier can provide a path-specific delivery sample.
 
-Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 02 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
+Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 03 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
 
 Delivery-rate estimation SHOULD avoid treating application-limited traffic as path capacity.
 
@@ -964,7 +966,7 @@ Delivery-rate estimation SHOULD avoid treating application-limited traffic as pa
 
 The normative MPX/4 state machines, Frame-validity matrices, cross-Carrier reordering rules, terminal Stream rules, tombstone requirements, and retired-identity behavior are defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-That document is part of the MPX/4 Core specification for Draft 02.
+That document is part of the MPX/4 Core specification for Draft 03.
 
 In particular, conforming implementations MUST support:
 
@@ -980,7 +982,7 @@ An implementation MAY use different internal state names or data structures, but
 
 ## 27. Resource limits
 
-Draft 02 Core limits are:
+Draft 03 Core limits are:
 
 | Limit | Value |
 |---|---:|
@@ -1030,7 +1032,7 @@ Implementations MUST validate lengths and integer arithmetic before allocation, 
 
 Implementations SHOULD bound unauthenticated handshake state, pending reliable Transmissions, receive buffering, and failed authentication work.
 
-Draft 02 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
+Draft 03 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
 
 ## 30. Wire-size considerations
 
@@ -1044,12 +1046,12 @@ MPX Frame and Secure Record sizes are protocol limits, not network MTUs. The und
 
 ## 31. Conformance requirements
 
-A conforming Draft 02 implementation MUST:
+A conforming Draft 03 implementation MUST:
 
 - recognize the MPX/4 Connection Preface;
 - reject non-canonical VarInts;
 - implement canonical Parameter ordering and duplicate rejection;
-- implement the Draft 02 key schedule exactly;
+- implement the Draft 03 key schedule exactly;
 - implement CLIENT_FINISHED and SERVER_FINISHED verification;
 - implement AES-256-GCM Secure Records with the specified nonce and AAD construction;
 - enforce peer receive limits;
@@ -1064,11 +1066,14 @@ A conforming Draft 02 implementation MUST:
 - preserve final-size invariants;
 - tolerate the specified cross-Carrier reordering cases;
 - retain terminal Stream state sufficient to prevent Stream-ID reuse;
-- distinguish Carrier-scoped and Session-scoped closure.
+- distinguish Carrier-scoped and Session-scoped closure;
+- implement at least one conforming transport binding;
+- when claiming TCP interoperability, implement bindings/tcp.md;
+- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 03 Core interoperability claim.
 
 ## 32. Future work
 
-The following remain outside Draft 02:
+The following remain outside Draft 03:
 
 - ephemeral key exchange and forward secrecy;
 - datagram transport;
@@ -1078,7 +1083,7 @@ The following remain outside Draft 02:
 - forward error correction;
 - explicit Carrier migration;
 - additional scheduler profiles;
-- non-byte-stream transport bindings.
+- additional transport bindings beyond the Draft 03 TCP baseline.
 
 ## 33. Normative references
 
@@ -1086,6 +1091,7 @@ The following remain outside Draft 02:
 - RFC 2119 — Key words for use in RFCs to Indicate Requirement Levels.
 - RFC 5869 — HMAC-based Extract-and-Expand Key Derivation Function.
 - RFC 8174 — Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words.
+- RFC 9293 — Transmission Control Protocol (TCP).
 - NIST FIPS 197 — Advanced Encryption Standard.
 - NIST SP 800-38D — Galois/Counter Mode for authenticated encryption.
 
@@ -1104,7 +1110,7 @@ An interoperable MPX/4 implementation preserves these invariants:
 9. Frame semantics do not depend on underlying packet boundaries.
 10. Wire registry values are stable within a protocol version.
 
-## Appendix B. Draft 02 wire constants
+## Appendix B. Draft 03 wire constants
 
     Protocol magic                     4d 50 58 00
     Protocol version                   4
