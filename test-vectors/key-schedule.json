@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 01",
+  "revision": "Draft 02",
   "profile": "PSK / HKDF-SHA256 / HMAC-SHA256 / AES-256-GCM",
   "inputs": {
     "transport_key_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
