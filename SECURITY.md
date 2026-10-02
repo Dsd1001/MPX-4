@@ -2,115 +2,197 @@
 
 ## Scope
 
-This document describes security requirements for MPX/4 protocol implementations and the process for reporting protocol or implementation vulnerabilities discovered through this repository.
+This document describes security requirements and operational guidance for MPX/4 implementations.
 
-The normative protocol security requirements are defined in [SPECIFICATION.md](SPECIFICATION.md). This document provides additional operational guidance.
+Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Security model
+## Draft 01 security profile
 
-MPX/4 assumes that Carrier transports may traverse untrusted networks.
+The mandatory-to-implement Draft 01 profile uses:
 
-Endpoints therefore MUST authenticate a Carrier before attaching it to Session state, and established protocol records MUST provide confidentiality and integrity protection.
-
-The Draft 00 mandatory-to-implement secure record profile uses:
-
-- a 32-octet pre-shared transport key as the authentication root;
+- a 32-octet cryptographically random pre-shared transport key;
+- fresh 32-octet Client and Server nonces for every Carrier handshake;
 - HKDF-SHA256 for key derivation;
-- independent traffic keys for each direction;
-- AES-256-GCM for authenticated encryption;
-- monotonically increasing per-direction record sequence numbers.
+- HMAC-SHA256 for Finished authentication;
+- independent Client-to-Server and Server-to-Client traffic keys;
+- AES-256-GCM with a 16-octet authentication tag;
+- a 12-octet per-direction traffic IV;
+- a monotonically increasing per-direction Secure Record sequence number.
 
-## Key requirements
+The exact key schedule, nonce construction, associated-data construction, and Finished calculations are normative in the Core specification.
 
-Transport keys MUST contain 256 bits of cryptographically random material.
+## Trust model
+
+MPX/4 assumes that Carrier transports can traverse networks that are fully observable and modifiable by an attacker.
+
+A Carrier is not authenticated merely because it presents a valid Session ID or Carrier ID.
+
+An endpoint MUST validate the peer's Finished authentication before attaching the Carrier to authenticated Session state.
+
+## Transport key requirements
+
+A transport key MUST contain 256 bits of cryptographically random material.
 
 Human-memorable passwords MUST NOT be used directly as transport keys.
 
-Transport keys SHOULD be provisioned through a confidential authenticated channel and SHOULD be rotated if compromise is suspected.
+Keys SHOULD be provisioned through a confidential authenticated channel.
 
 Different administrative trust domains SHOULD use independent transport keys.
 
-## Nonce and sequence-number safety
+A transport key SHOULD be replaced after suspected disclosure.
 
-AEAD nonce reuse under the same traffic key is forbidden.
+## Forward secrecy
 
-Implementations MUST:
+The mandatory Draft 01 profile does not provide forward secrecy.
 
-1. maintain independent sequence-number spaces for each traffic direction;
-2. prevent sequence-number wraparound;
-3. derive fresh application traffic keys for independent authenticated Carrier handshakes;
-4. terminate the affected Carrier before any sequence number would be reused.
+Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
-## Handshake integrity
+A future negotiated ephemeral key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream abstractions.
 
-Authentication MUST cover every negotiated value that can change Session behavior, including Session identity, Carrier identity, Carrier generation, scheduler selection, flow-control limits, and protocol limits.
+## Handshake transcript integrity
 
-Implementations MUST reject malformed, truncated, duplicated, or contradictory critical handshake Parameters.
+Finished authentication covers the exact encoded Connection Preface, CLIENT_INIT, and SERVER_INIT bytes, and SERVER_FINISHED additionally commits to CLIENT_FINISHED as specified by the transcript hashes.
 
-Authentication values SHOULD be compared in constant time.
+Implementations MUST authenticate all Parameters that influence Session behavior, including:
 
-## Replay considerations
+- Session ID and action;
+- Carrier ID and Generation;
+- scheduler selection;
+- configured path capacity;
+- receive limits;
+- fresh handshake nonces.
 
-Implementations MUST NOT attach a Carrier to a live Session solely on the basis of unauthenticated Session or Carrier identifiers.
+Parameter parsing MUST reject duplicate, out-of-order, malformed, and contradictory Core Parameters before accepting the handshake.
 
-Fresh handshake nonces and authenticated handshake transcripts are REQUIRED.
+## Key separation
 
-Implementations SHOULD maintain sufficient state to prevent an older Carrier generation from replacing a newer accepted generation for the same logical Carrier ID.
+Client and Server Finished keys are independently derived.
+
+Client-to-Server and Server-to-Client application traffic secrets are independently derived.
+
+Each Carrier performs a fresh handshake containing fresh nonces and Carrier identity, producing independent traffic keys even when multiple Carriers belong to the same Session.
+
+## Secure Record safety
+
+Draft 01 uses a per-direction Record Sequence Number beginning at zero.
+
+The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
+
+The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit representation of the sequence number.
+
+Nonce reuse under one traffic key is forbidden.
+
+Draft 01 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+
+An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
+
+## Replay and stale Carrier handling
+
+A complete old Carrier handshake cannot validly replace a newer Carrier incarnation solely by replaying Session identifiers.
+
+Implementations MUST enforce Carrier Generation rules:
+
+- a lower Generation than an already accepted Generation is stale;
+- a conflicting equal live Generation is rejected;
+- a higher authenticated Generation supersedes older state for that Carrier ID.
+
+Reliable Transmission IDs are Session-wide and are never reused.
+
+Retransmission and reinjection repeat the same Transmission ID. If the same Transmission ID is observed with different semantic Frame contents, the Session is invalid.
+
+## Stream-data integrity
+
+AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
+
+When data overlaps byte positions already accepted on a Stream, the overlapping octets MUST be identical.
+
+Conflicting bytes at the same Stream offset are a Session-level protocol violation.
+
+Final-size declarations are immutable once authenticated. Data beyond a known final size or a contradictory final size is invalid.
+
+## Flow-control safety
+
+Stream and Session credit are absolute, monotonic limits.
+
+A retransmission or reinjection of already committed bytes consumes no additional logical credit.
+
+Implementations MUST validate:
+
+- offset addition for integer overflow;
+- Maximum Offset against Stream commitment;
+- Maximum Bytes against Session commitment;
+- final sizes against previously authenticated data;
+- monotonically increasing consumed and maximum values.
+
+Flow-control accounting MUST remain valid when Carriers disconnect or are replaced.
 
 ## Parser robustness
 
-All length fields, VarInts, counts, and resource allocations MUST be validated before allocation or indexing.
+All untrusted lengths and VarInts MUST be validated before allocation or indexing.
 
-Implementations SHOULD enforce explicit limits on:
+Implementations MUST reject non-canonical VarInts.
 
-- handshake message size;
-- Secure Record size;
-- Frame size;
+Implementations SHOULD impose explicit bounds on:
+
+- unauthenticated handshake bytes;
 - Parameters per handshake;
+- Secure Record plaintext;
+- Frame bodies;
 - active Sessions;
 - Carriers per Session;
-- Streams per Session;
-- pending retransmissions;
-- pending application bytes.
+- active Streams;
+- pending reliable Transmissions;
+- receive buffering;
+- diagnostic reason strings.
 
-Malformed input MUST NOT cause memory corruption, integer overflow, unbounded allocation, or process termination.
+Malformed input MUST NOT cause integer overflow, memory corruption, unbounded allocation, or process termination.
 
 ## Resource exhaustion
 
-Authentication does not remove denial-of-service risk.
+Authentication does not eliminate denial-of-service risk.
 
 Implementations SHOULD:
 
-- bound unauthenticated handshake state;
 - apply handshake deadlines;
+- bound unauthenticated handshake state;
 - release incomplete Session state promptly;
-- rate-limit repeated failed authentication attempts when appropriate;
-- avoid allocating large per-Stream structures before authentication and limit checks complete.
+- rate-limit repeated expensive failures where operationally appropriate;
+- avoid allocating large per-Stream buffers before authentication and limit checks complete;
+- bound retransmission and reassembly state.
 
 ## Error handling
 
 Protocol errors SHOULD fail closed.
 
+Carrier-scoped failures SHOULD terminate only the affected Carrier when shared Session state remains valid.
+
+Session-state contradictions, including flow-control violations and conflicting Stream data, require Session termination.
+
 Diagnostic reason strings are non-normative and MUST NOT control protocol behavior.
 
-Implementations SHOULD avoid exposing secret key material, plaintext application data, or derived traffic keys in logs.
+Implementations SHOULD avoid logging transport keys, derived traffic secrets, authentication values, or plaintext application data.
 
-## Cryptographic agility
+## Test vectors
 
-Draft 00 defines a mandatory-to-implement cryptographic profile so that independent implementations have a common interoperable baseline.
+The repository provides machine-readable interoperability vectors for:
 
-Future profiles MAY introduce additional key exchanges or AEAD algorithms through explicit protocol negotiation. A new profile MUST define downgrade behavior and MUST NOT silently reinterpret existing cryptographic Parameters.
+- MPX VarInt encoding;
+- Frame encoding;
+- Draft 01 key derivation and Finished authentication;
+- Draft 01 Secure Record encryption.
+
+Independent implementations SHOULD validate these vectors before interoperability testing.
 
 ## Reporting a vulnerability
 
-Please do not disclose suspected security vulnerabilities in a public issue.
+Do not disclose suspected exploitable vulnerabilities in a public issue.
 
-Use the repository's GitHub private vulnerability reporting / Security Advisory mechanism when available. Reports should include:
+Use GitHub private vulnerability reporting / Security Advisories when available. A useful report includes:
 
 - affected protocol revision or implementation;
-- a concise description of the issue;
+- concise issue description;
 - reproduction steps or a minimal proof of concept when appropriate;
 - expected security impact;
-- any suggested mitigation.
+- suggested mitigation if known.
 
-Protocol-design issues that do not disclose an exploitable vulnerability may be discussed through normal repository issues.
+Protocol-design questions that do not disclose an exploitable vulnerability can be discussed through normal repository issues.
