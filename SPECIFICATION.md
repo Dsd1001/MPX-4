@@ -758,7 +758,7 @@ Draft 01 limits:
 
 The first authenticated Carrier of a Session MUST be followed by a SESSION_CREDIT advertisement in each direction before application data is sent in that direction.
 
-Additional Carriers do not create additional Session credit.
+Additional Carriers do not create additional Session credit. STREAM_CREDIT and SESSION_CREDIT are Session state and MAY be carried on any active Carrier; an endpoint MAY refresh the current values after Carrier replacement.
 
 ## 18. Stream final size and directional termination
 
