@@ -14,10 +14,11 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 01  
+**Specification revision:** Draft 02  
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
+- [Normative State Machines and Frame Validity](STATE-MACHINES.md)
 - [Protocol Registries](REGISTRIES.md)
 - [Security Policy and Guidance](SECURITY.md)
 - [Specification Changelog](CHANGELOG.md)
@@ -52,6 +53,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Handshake walkthrough](examples/handshake.md)
 - [Frame encoding examples](examples/frames.md)
 - [Retransmission and reinjection example](examples/reliability.md)
+- [Terminal Stream lifecycle example](examples/terminal-lifecycle.md)
 
 ### Test vectors
 
@@ -60,6 +62,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Frame encoding vectors](test-vectors/frame-encoding.json)
 - [Key schedule and Finished vector](test-vectors/key-schedule.json)
 - [Secure Record vector](test-vectors/secure-record.json)
+- [State validity cases](test-vectors/state-validity.json)
 
 Test vectors are intended to let independent implementations verify identical wire encodings and cryptographic derivations.
 
@@ -95,7 +98,8 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     .
     ├── README.md
     ├── SPECIFICATION.md
-    ├── REGISTRIES.md
+    ├── STATE-MACHINES.md
+├── REGISTRIES.md
     ├── SECURITY.md
     ├── CHANGELOG.md
     ├── CONTRIBUTING.md
@@ -113,7 +117,8 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── varint.json
     │   ├── frame-encoding.json
     │   ├── key-schedule.json
-    │   └── secure-record.json
+    │   ├── secure-record.json
+│   └── state-validity.json
     └── .github/
         ├── ISSUE_TEMPLATE/
         └── pull_request_template.md
