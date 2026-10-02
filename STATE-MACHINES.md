@@ -146,16 +146,19 @@ Therefore the Client can observe a Frame that could only have been sent after ac
 While in OPENING, the Client MUST tolerate the following inbound Frames as **acceptance evidence**:
 
 - STREAM_CREDIT;
-- STREAM_DATA;
-- STREAM_FIN;
-- RESET_STREAM;
+- STREAM_FIN with Final Offset 0;
+- RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
+
+Draft 02 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
 After acceptance evidence has been observed, a later STREAM_OPEN_REJECT for that Stream is a STREAM_STATE_ERROR.
 
 An implementation MAY internally transition to an equivalent "OPENING_WITH_ACCEPTANCE_EVIDENCE" state.
+
+A rejected opening is terminal. Once STREAM_OPEN_REJECT is processed, the Stream ID MUST NOT be reused. An implementation MAY represent the rejected Stream as a tombstone containing the original open Transmission ID, the rejection decision, and Error Code.
 
 The Server MUST NOT send any acceptance-evidence Frame before it has accepted the Stream.
 
@@ -256,9 +259,9 @@ Legend:
 | STREAM_OPEN_OK | E | E | A | D if same open TxID | I | I |
 | STREAM_OPEN_REJECT | E | E | A unless acceptance evidence exists | E after accepted | I | I |
 | STREAM_CREDIT | E | E before accept | B | A | validate then ignore | I |
-| STREAM_DATA | E | E before accept | B | A | stale handling | I |
-| STREAM_FIN | E | E before accept | B | A | stale handling | I |
-| RESET_STREAM | C only with Final Offset 0 | C | B | A | D/validate | I |
+| STREAM_DATA | E | E before accept | E | A | stale handling | I |
+| STREAM_FIN | E | E before accept | B only with Final Offset 0 | A | stale handling | I |
+| RESET_STREAM | C only with Final Offset 0 | C | B only with Final Offset 0 | A | D/validate | I |
 | STOP_SENDING | C | C | B | A | D/validate | I |
 | STREAM_CONSUMED | E | E | E | state-dependent | D/validate | I |
 
