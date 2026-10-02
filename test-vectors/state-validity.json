@@ -88,7 +88,11 @@
       "state": "UNSEEN responder",
       "frame": "STOP_SENDING",
       "expected": "preopen_cancellation",
-      "response": "TRANSMISSION_ACK"
+      "response": [
+        "TRANSMISSION_ACK",
+        "RESET_STREAM(final_offset=0)"
+      ],
+      "notes": "A later STREAM_OPEN for the same Stream ID is rejected with STREAM_STATE_ERROR."
     },
     {
       "name": "late-data-fills-fin-hole",
@@ -216,6 +220,25 @@
       "state": "CLOSING",
       "frame": "SESSION_CLOSE",
       "expected": "idempotent"
+    },
+    {
+      "name": "fin-then-reset-same-final",
+      "state": "FIN_RECEIVED",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "final_offset": "same as established final_offset"
+      },
+      "expected": "apply_reset_semantics",
+      "notes": "RESET_STREAM becomes authoritative for application-visible termination."
+    },
+    {
+      "name": "reset-then-fin-same-final",
+      "state": "RESET_RECEIVED",
+      "frame": "STREAM_FIN",
+      "conditions": {
+        "final_offset": "same as established final_offset"
+      },
+      "expected": "acknowledge_without_changing_reset_semantics"
     }
   ]
 }
