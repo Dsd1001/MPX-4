@@ -1,0 +1,38 @@
+name: Protocol clarification
+description: Report ambiguous, contradictory, or underspecified protocol text.
+title: "[clarification] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for specification questions or ambiguities. For implementation-specific defects, use the implementation repository.
+  - type: input
+    id: section
+    attributes:
+      label: Specification section
+      description: Identify the section, Frame, Parameter, or registry entry.
+      placeholder: "e.g. Section 17 — TRANSMISSION_ACK"
+    validations:
+      required: true
+  - type: textarea
+    id: ambiguity
+    attributes:
+      label: Ambiguity or conflict
+      description: Describe what can be interpreted in more than one way.
+    validations:
+      required: true
+  - type: textarea
+    id: interpretation
+    attributes:
+      label: Proposed interpretation
+      description: If possible, describe the behavior you believe should be normative.
+    validations:
+      required: false
+  - type: textarea
+    id: interoperability
+    attributes:
+      label: Interoperability impact
+      description: Explain whether independent implementations could behave differently.
+    validations:
+      required: false
