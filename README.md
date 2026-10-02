@@ -14,11 +14,13 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 02  
+**Specification revision:** Draft 03  
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
 - [Normative State Machines and Frame Validity](STATE-MACHINES.md)
+- [MPX/4 over TCP](bindings/tcp.md)
+- [Interoperability Profile](INTEROPERABILITY.md)
 - [Protocol Registries](REGISTRIES.md)
 - [Security Policy and Guidance](SECURITY.md)
 - [Specification Changelog](CHANGELOG.md)
@@ -54,6 +56,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Frame encoding examples](examples/frames.md)
 - [Retransmission and reinjection example](examples/reliability.md)
 - [Terminal Stream lifecycle example](examples/terminal-lifecycle.md)
+- [TCP Carrier example](examples/tcp-carrier.md)
 
 ### Test vectors
 
@@ -63,6 +66,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Key schedule and Finished vector](test-vectors/key-schedule.json)
 - [Secure Record vector](test-vectors/secure-record.json)
 - [State validity cases](test-vectors/state-validity.json)
+- [TCP binding framing cases](test-vectors/tcp-binding.json)
 
 Test vectors are intended to let independent implementations verify identical wire encodings and cryptographic derivations.
 
@@ -99,27 +103,31 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     ├── README.md
     ├── SPECIFICATION.md
     ├── STATE-MACHINES.md
+    ├── INTEROPERABILITY.md
     ├── REGISTRIES.md
     ├── SECURITY.md
     ├── CHANGELOG.md
     ├── CONTRIBUTING.md
     ├── LICENSE
     ├── bindings/
-    │   └── README.md
+    │   ├── README.md
+    │   └── tcp.md
     ├── extensions/
     │   └── README.md
     ├── examples/
     │   ├── handshake.md
     │   ├── frames.md
     │   ├── reliability.md
-    │   └── terminal-lifecycle.md
+    │   ├── terminal-lifecycle.md
+    │   └── tcp-carrier.md
     ├── test-vectors/
     │   ├── README.md
     │   ├── varint.json
     │   ├── frame-encoding.json
     │   ├── key-schedule.json
     │   ├── secure-record.json
-    │   └── state-validity.json
+    │   ├── state-validity.json
+    │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/
         └── pull_request_template.md
