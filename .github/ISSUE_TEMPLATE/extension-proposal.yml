@@ -1,0 +1,52 @@
+name: Extension proposal
+description: Propose a new MPX/4 Frame, Parameter, scheduler profile, transport binding, or protocol extension.
+title: "[extension] "
+labels: []
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Extension name
+      placeholder: "e.g. MPX Datagram Extension"
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Session
+        - Carrier
+        - Stream
+        - Transmission
+        - Transport binding
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: Describe the capability or interoperability problem the extension addresses.
+    validations:
+      required: true
+  - type: textarea
+    id: wire
+    attributes:
+      label: Proposed wire representation
+      description: Describe Frames, Parameters, state transitions, and registry allocations.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and negotiation
+      description: Explain how support is negotiated and how unsupported peers behave.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and resource considerations
+    validations:
+      required: true
