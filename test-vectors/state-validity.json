@@ -1,0 +1,221 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 02",
+  "document": "STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "open-new-stream",
+      "state": "UNSEEN responder",
+      "frame": "STREAM_OPEN",
+      "expected": "apply",
+      "notes": "Create OPEN_PENDING state when Stream ID and Transmission ID are valid."
+    },
+    {
+      "name": "duplicate-open-same-transmission",
+      "state": "OPEN responder",
+      "frame": "STREAM_OPEN",
+      "conditions": {
+        "transmission_id": "same as original"
+      },
+      "expected": "idempotent",
+      "response": "repeat STREAM_OPEN_OK"
+    },
+    {
+      "name": "duplicate-open-conflicting-transmission",
+      "state": "OPEN responder",
+      "frame": "STREAM_OPEN",
+      "conditions": {
+        "transmission_id": "different from original"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "credit-overtakes-open-ok",
+      "state": "OPENING initiator",
+      "frame": "STREAM_CREDIT",
+      "expected": "acceptance_evidence"
+    },
+    {
+      "name": "data-before-open-ok",
+      "state": "OPENING initiator",
+      "frame": "STREAM_DATA",
+      "expected": "session_error",
+      "error": "STREAM_STATE_ERROR",
+      "notes": "Draft 02 has no implicit Stream data credit."
+    },
+    {
+      "name": "zero-fin-overtakes-open-ok",
+      "state": "OPENING initiator",
+      "frame": "STREAM_FIN",
+      "conditions": {
+        "final_offset": "0"
+      },
+      "expected": "acceptance_evidence"
+    },
+    {
+      "name": "nonzero-fin-before-open-ok",
+      "state": "OPENING initiator",
+      "frame": "STREAM_FIN",
+      "conditions": {
+        "final_offset": ">0"
+      },
+      "expected": "session_error",
+      "error": "STREAM_STATE_ERROR"
+    },
+    {
+      "name": "preopen-reset-zero",
+      "state": "UNSEEN responder",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "final_offset": "0"
+      },
+      "expected": "preopen_cancellation",
+      "response": "TRANSMISSION_ACK"
+    },
+    {
+      "name": "preopen-reset-nonzero",
+      "state": "UNSEEN responder",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "final_offset": ">0"
+      },
+      "expected": "session_error",
+      "error": "STREAM_STATE_ERROR"
+    },
+    {
+      "name": "preopen-stop-sending",
+      "state": "UNSEEN responder",
+      "frame": "STOP_SENDING",
+      "expected": "preopen_cancellation",
+      "response": "TRANSMISSION_ACK"
+    },
+    {
+      "name": "late-data-fills-fin-hole",
+      "state": "FIN_RECEIVED",
+      "frame": "STREAM_DATA",
+      "conditions": {
+        "end_offset": "<= final_offset",
+        "bytes": "consistent"
+      },
+      "expected": "apply"
+    },
+    {
+      "name": "data-beyond-fin",
+      "state": "FIN_RECEIVED",
+      "frame": "STREAM_DATA",
+      "conditions": {
+        "end_offset": "> final_offset"
+      },
+      "expected": "session_error",
+      "error": "FINAL_SIZE_ERROR"
+    },
+    {
+      "name": "late-data-after-reset",
+      "state": "RESET_RECEIVED",
+      "frame": "STREAM_DATA",
+      "conditions": {
+        "end_offset": "<= final_offset"
+      },
+      "expected": "stale_duplicate_no_application_delivery"
+    },
+    {
+      "name": "conflicting-terminal-size",
+      "state": "FIN_RECEIVED",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "final_offset": "different from established final_offset"
+      },
+      "expected": "session_error",
+      "error": "FINAL_SIZE_ERROR"
+    },
+    {
+      "name": "ack-outstanding-transmission",
+      "state": "Session active",
+      "frame": "TRANSMISSION_ACK",
+      "conditions": {
+        "transmission_id": "outstanding"
+      },
+      "expected": "settle_transmission"
+    },
+    {
+      "name": "ack-settled-transmission",
+      "state": "Session active",
+      "frame": "TRANSMISSION_ACK",
+      "conditions": {
+        "transmission_id": "previously settled"
+      },
+      "expected": "ignore_duplicate"
+    },
+    {
+      "name": "ack-never-allocated-transmission",
+      "state": "Session active",
+      "frame": "TRANSMISSION_ACK",
+      "conditions": {
+        "transmission_id": ">= next unallocated local Transmission ID"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "stream-credit-after-send-closed",
+      "state": "SEND_CLOSED",
+      "frame": "STREAM_CREDIT",
+      "conditions": {
+        "consumed_offset": "<= local_final_offset"
+      },
+      "expected": "validate_then_ignore"
+    },
+    {
+      "name": "stream-consumed-wrong-final",
+      "state": "FIN_PENDING",
+      "frame": "STREAM_CONSUMED",
+      "conditions": {
+        "final_offset": "different from local final_offset"
+      },
+      "expected": "session_error",
+      "error": "FINAL_SIZE_ERROR"
+    },
+    {
+      "name": "tombstone-duplicate-terminal",
+      "state": "TOMBSTONE",
+      "frame": "STREAM_FIN",
+      "conditions": {
+        "transmission_id": "same terminal TxID",
+        "final_offset": "same"
+      },
+      "expected": "idempotent",
+      "response": "TRANSMISSION_ACK"
+    },
+    {
+      "name": "tombstone-data-beyond-final",
+      "state": "TOMBSTONE",
+      "frame": "STREAM_DATA",
+      "conditions": {
+        "end_offset": "> recorded peer final_offset"
+      },
+      "expected": "session_error",
+      "error": "FINAL_SIZE_ERROR"
+    },
+    {
+      "name": "retired-data",
+      "state": "RETIRED_ID",
+      "frame": "STREAM_DATA",
+      "expected": "ignore",
+      "notes": "Must not recreate Stream state or application delivery."
+    },
+    {
+      "name": "retired-open",
+      "state": "RETIRED_ID",
+      "frame": "STREAM_OPEN",
+      "expected": "ignore",
+      "notes": "Must not recreate Stream state."
+    },
+    {
+      "name": "duplicate-session-close",
+      "state": "CLOSING",
+      "frame": "SESSION_CLOSE",
+      "expected": "idempotent"
+    }
+  ]
+}
