@@ -1,0 +1,134 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 04",
+  "document": "ERROR-HANDLING.md",
+  "cases": [
+    {
+      "name": "stream-limit-on-open",
+      "context": "STREAM_OPEN",
+      "error": "STREAM_LIMIT",
+      "expected_scope": "stream_opening",
+      "expected_action": "STREAM_OPEN_REJECT"
+    },
+    {
+      "name": "stream-resource-limit-on-open",
+      "context": "STREAM_OPEN",
+      "resource_scope": "one_stream",
+      "error": "RESOURCE_LIMIT",
+      "expected_scope": "stream_opening",
+      "expected_action": "STREAM_OPEN_REJECT"
+    },
+    {
+      "name": "join-session-not-found",
+      "context": "JOIN_HANDSHAKE",
+      "error": "SESSION_NOT_FOUND",
+      "expected_scope": "pre_establishment_carrier",
+      "expected_action": "reject_candidate",
+      "existing_session_modified": false
+    },
+    {
+      "name": "join-carrier-conflict",
+      "context": "JOIN_HANDSHAKE",
+      "error": "CARRIER_CONFLICT",
+      "expected_scope": "pre_establishment_carrier",
+      "expected_action": "reject_candidate",
+      "generation_advanced": false
+    },
+    {
+      "name": "finished-authentication-failure",
+      "context": "HANDSHAKE",
+      "error": "AUTHENTICATION_FAILED",
+      "expected_scope": "carrier",
+      "expected_action": "terminate_carrier"
+    },
+    {
+      "name": "secure-record-authentication-failure",
+      "context": "ESTABLISHED_CARRIER",
+      "error": "AUTHENTICATION_FAILED",
+      "expected_scope": "carrier",
+      "expected_action": "terminate_carrier",
+      "session_remains_usable_if_other_carrier_exists": true
+    },
+    {
+      "name": "malformed-authenticated-frame",
+      "context": "ESTABLISHED_CARRIER",
+      "error": "FRAME_ENCODING_ERROR",
+      "expected_scope": "carrier",
+      "expected_action": "CARRIER_CLOSE_if_safely_reportable"
+    },
+    {
+      "name": "stream-flow-control-violation",
+      "context": "STREAM_DATA",
+      "error": "FLOW_CONTROL_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE",
+      "trigger_frame_type": "STREAM_DATA"
+    },
+    {
+      "name": "final-size-conflict",
+      "context": "STREAM_FIN_or_RESET_STREAM",
+      "error": "FINAL_SIZE_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE"
+    },
+    {
+      "name": "transmission-id-conflict",
+      "context": "RELIABLE_FRAME",
+      "error": "TRANSMISSION_ID_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE"
+    },
+    {
+      "name": "stream-state-error-after-establishment",
+      "context": "ESTABLISHED_STREAM",
+      "error": "STREAM_STATE_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE"
+    },
+    {
+      "name": "preopen-cancellation-late-open",
+      "context": "STREAM_OPEN_after_valid_preopen_RESET_or_STOP",
+      "error": "STREAM_STATE_ERROR",
+      "expected_scope": "stream_opening",
+      "expected_action": "STREAM_OPEN_REJECT",
+      "notes": "This explicit state-machine rule is narrower than the default Session scope for STREAM_STATE_ERROR."
+    },
+    {
+      "name": "retired-open-with-compacted-state",
+      "context": "STREAM_OPEN_for_RETIRED_ID",
+      "expected_scope": "retired_identity",
+      "expected_action": "ignore_without_recreating_stream",
+      "notes": "Retirement alone does not require STREAM_OPEN_REJECT when detailed response state has been compacted."
+    },
+    {
+      "name": "carrier-resource-limit",
+      "context": "ESTABLISHED_CARRIER",
+      "resource_scope": "one_carrier",
+      "error": "RESOURCE_LIMIT",
+      "expected_scope": "carrier",
+      "expected_action": "CARRIER_CLOSE"
+    },
+    {
+      "name": "session-resource-limit",
+      "context": "ESTABLISHED_SESSION",
+      "resource_scope": "shared_session_state",
+      "error": "RESOURCE_LIMIT",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE"
+    },
+    {
+      "name": "session-error-atomicity",
+      "context": "SESSION_CLOSING",
+      "other_carrier_frame": "STREAM_OPEN",
+      "expected": "must_not_create_new_stream"
+    },
+    {
+      "name": "no-specific-trigger-frame",
+      "context": "local_session_failure",
+      "error": "INTERNAL_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE",
+      "trigger_frame_type": 0
+    }
+  ]
+}

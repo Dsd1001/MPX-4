@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 03",
+  "revision": "Draft 04",
   "encoding": "MPX VarInt",
   "canonical_encoding": "Encoders MUST use the shortest width capable of representing the value. Receivers MUST reject non-canonical encodings.",
   "vectors": [

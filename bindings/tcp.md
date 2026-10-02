@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 03  
+**Revision:** Draft 04
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -67,7 +67,7 @@ The Server MUST NOT treat a TCP connection as an authenticated Carrier until the
 
 ## 5. Port selection
 
-MPX/4 Draft 03 does not define or reserve a well-known TCP port.
+MPX/4 Draft 04 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -224,7 +224,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 03.
+The exact deadline is local policy and is not negotiated by Draft 04.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -279,28 +279,38 @@ Because a replacement Carrier performs a new authenticated handshake with new tr
 
 ## 20. Carrier replacement
 
-To replace a failed logical Carrier:
+Carrier Generation acceptance is a Core Session state machine defined in SPECIFICATION.md and STATE-MACHINES.md. The TCP binding supplies only the underlying replacement connection.
+
+To attempt replacement of a failed or retired logical Carrier over TCP:
 
 1. establish a new TCP connection;
 2. send a new MPX Connection Preface;
 3. perform a complete JOIN handshake;
 4. use the same CARRIER_ID;
-5. use a CARRIER_GENERATION strictly greater than the last accepted Generation for that ID;
+5. use a CARRIER_GENERATION strictly greater than the Highest Accepted Generation for that ID;
 6. use fresh handshake nonces;
-7. derive fresh traffic keys;
+7. derive fresh traffic keys and IVs;
 8. begin new per-direction Record Sequence Numbers at zero.
 
-The new TCP connection does not resume the old Carrier cryptographic record stream.
+The candidate TCP connection does not become the current Carrier merely by connecting or sending CLIENT_INIT. The current Core Generation is unchanged until the candidate reaches ESTABLISHED.
 
-Session-level reliable Transmission state can continue across the replacement.
+The new TCP connection never resumes the old Carrier cryptographic record stream.
+
+A failed replacement handshake is discarded without changing the current Generation or existing Session state.
+
+After a higher Generation is accepted, lower-Generation TCP connections for the same Carrier ID are superseded according to the Core state machine and SHOULD be closed promptly.
+
+Session-level reliable Transmission state continues across the replacement. Retransmission or reinjection on the replacement retains the original Transmission ID.
 
 ## 21. Simultaneous replacement attempts
 
-If more than one TCP connection attempts to JOIN using the same Carrier ID and Generation, at most one can become the accepted live Carrier incarnation.
+Multiple TCP replacement candidates may exist concurrently, but TCP connection arrival order does not reserve or select a Carrier Generation.
 
-A conflicting equal Generation is rejected according to the Core CARRIER_CONFLICT rule.
+Generation comparison occurs at the Core establishment commit point.
 
-Implementations SHOULD choose the first fully authenticated accepted incarnation and reject later equal-Generation conflicts.
+If more than one TCP connection attempts to JOIN using the same Carrier ID and Generation, at most one can become the accepted Carrier incarnation. Once one is accepted, another equal-Generation candidate is rejected with CARRIER_CONFLICT even if the accepted transport subsequently closes.
+
+A separately authenticated candidate using a still-higher Generation may later supersede the current incarnation according to the Core state machine.
 
 ## 22. TCP half-close
 

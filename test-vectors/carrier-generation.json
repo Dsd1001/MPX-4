@@ -1,0 +1,131 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 04",
+  "document": "STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "first-incarnation-generation-zero",
+      "carrier_id_state": "UNUSED",
+      "candidate_generation": 0,
+      "candidate_result": "authenticated_and_validated",
+      "expected": "accept",
+      "highest_accepted_generation": 0
+    },
+    {
+      "name": "first-incarnation-nonzero",
+      "carrier_id_state": "UNUSED",
+      "candidate_generation": 1,
+      "expected": "reject_candidate",
+      "error": "CARRIER_CONFLICT"
+    },
+    {
+      "name": "higher-generation-before-authentication",
+      "highest_accepted_generation": 2,
+      "candidate_generation": 3,
+      "candidate_state": "HANDSHAKING",
+      "expected": "no_generation_change",
+      "current_generation": 2
+    },
+    {
+      "name": "failed-higher-generation-handshake",
+      "highest_accepted_generation": 2,
+      "candidate_generation": 3,
+      "candidate_result": "authentication_failed",
+      "expected": "reject_candidate",
+      "highest_accepted_generation_after": 2,
+      "current_generation_after": 2
+    },
+    {
+      "name": "stale-lower-generation",
+      "highest_accepted_generation": 3,
+      "candidate_generation": 2,
+      "expected": "reject_candidate",
+      "error": "CARRIER_CONFLICT"
+    },
+    {
+      "name": "equal-generation-live-conflict",
+      "highest_accepted_generation": 3,
+      "current_transport": "live",
+      "candidate_generation": 3,
+      "expected": "reject_candidate",
+      "error": "CARRIER_CONFLICT"
+    },
+    {
+      "name": "equal-generation-after-loss-still-conflict",
+      "highest_accepted_generation": 3,
+      "current_transport": "lost",
+      "candidate_generation": 3,
+      "expected": "reject_candidate",
+      "error": "CARRIER_CONFLICT",
+      "notes": "An accepted Carrier incarnation tuple is never reusable."
+    },
+    {
+      "name": "higher-generation-commit",
+      "highest_accepted_generation": 3,
+      "candidate_generation": 4,
+      "candidate_result": "established",
+      "expected": "replace",
+      "highest_accepted_generation_after": 4,
+      "previous_generation_state": "SUPERSEDED"
+    },
+    {
+      "name": "superseded-carrier-not-schedulable",
+      "highest_accepted_generation": 4,
+      "carrier_generation": 3,
+      "carrier_state": "SUPERSEDED",
+      "operation": "schedule_new_attempt",
+      "expected": "forbidden"
+    },
+    {
+      "name": "superseded-record-after-commit",
+      "highest_accepted_generation": 4,
+      "carrier_generation": 3,
+      "record_arrival": "after_generation_commit",
+      "expected": "ignore_as_new_protocol_state"
+    },
+    {
+      "name": "processed-old-record-before-commit-remains-applied",
+      "highest_accepted_generation_before": 3,
+      "carrier_generation": 3,
+      "record_processing": "completed_before_generation_4_commit",
+      "expected": "retain_applied_effect"
+    },
+    {
+      "name": "replacement-preserves-transmission-id",
+      "highest_accepted_generation_before": 3,
+      "highest_accepted_generation_after": 4,
+      "outstanding_transmission_id": 27,
+      "operation": "reinject_on_replacement",
+      "expected_transmission_id": 27
+    },
+    {
+      "name": "simultaneous-equal-generation-candidates",
+      "highest_accepted_generation": 4,
+      "candidate_generations": [5, 5],
+      "candidate_results": ["established_first", "established_later"],
+      "expected": ["accept_generation_5", "reject_candidate"],
+      "error_for_later": "CARRIER_CONFLICT"
+    },
+    {
+      "name": "later-still-higher-candidate",
+      "highest_accepted_generation": 4,
+      "candidate_generations": [5, 6],
+      "candidate_results": ["generation_5_established", "generation_6_established_afterward"],
+      "expected_highest_accepted_generation": 6
+    },
+    {
+      "name": "maximum-generation-no-wrap",
+      "highest_accepted_generation": 4611686018427387903,
+      "operation": "replace_same_carrier_id",
+      "expected": "no_valid_higher_generation",
+      "wrap_to_zero": "forbidden"
+    },
+    {
+      "name": "join-during-session-closing",
+      "session_state": "CLOSING",
+      "candidate_generation": 8,
+      "expected": "reject_candidate",
+      "error": "SESSION_CONFLICT"
+    }
+  ]
+}

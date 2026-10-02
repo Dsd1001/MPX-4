@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 03  
+**Revision:** Draft 04
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -34,7 +34,9 @@ A malformed encoding remains FRAME_ENCODING_ERROR.
 
 A flow-control violation remains FLOW_CONTROL_ERROR.
 
-When a violation changes or contradicts shared Stream state, the error is Session-scoped unless this document explicitly says otherwise.
+Failure scope and the required CARRIER_CLOSE / SESSION_CLOSE action are defined normatively in [ERROR-HANDLING.md](ERROR-HANDLING.md).
+
+When a violation changes or contradicts shared Stream state, the error is Session-scoped unless this document explicitly defines a narrower STREAM_OPEN_REJECT action.
 
 ## 3. Session state
 
@@ -101,6 +103,106 @@ After a Carrier enters CLOSING, no new application or control Frames may be sche
 
 Carrier failure does not by itself change Stream lifecycle state.
 
+### 4.1. Logical Carrier generation state
+
+In addition to the transport lifecycle above, a Session maintains Generation state per Carrier ID.
+
+For each Carrier ID, the abstract state is:
+
+    UNUSED
+      |
+      | accept Generation 0
+      v
+    CURRENT(G)
+      |
+      | authenticate and accept G' > G
+      v
+    CURRENT(G')
+
+Every previously accepted lower Generation is then SUPERSEDED.
+
+A candidate handshake is not a Carrier incarnation accepted by the Session until it reaches ESTABLISHED.
+
+### 4.2. First incarnation
+
+When a Carrier ID is UNUSED, only Generation 0 can become the first accepted incarnation.
+
+A candidate for an UNUSED Carrier ID with Generation greater than zero is rejected with CARRIER_CONFLICT.
+
+A failed candidate does not change UNUSED state.
+
+### 4.3. Replacement candidate
+
+Let G be the Highest Accepted Generation and let G' be the Generation in a JOIN candidate for the same Carrier ID.
+
+Before the candidate reaches ESTABLISHED:
+
+- G remains current;
+- the current Carrier remains eligible subject to its own liveness state;
+- the candidate MUST NOT receive Session application Frames;
+- the candidate MUST NOT change Stream, credit, scheduler, or reliable Transmission state.
+
+If authentication or JOIN validation fails, the candidate is discarded and G remains unchanged.
+
+### 4.4. Generation comparison
+
+A JOIN candidate is evaluated as follows:
+
+| Candidate Generation | Result |
+|---|---|
+| G' < G | reject CARRIER_CONFLICT as stale |
+| G' = G | reject CARRIER_CONFLICT as Carrier-incarnation reuse |
+| G' > G | eligible replacement; commit only after full Carrier establishment |
+
+Equal Generation is a conflict even when the previously accepted transport is already closed or lost. A Carrier incarnation tuple MUST NOT be reused.
+
+### 4.5. Replacement commit
+
+When a candidate with G' > G reaches ESTABLISHED, the Generation advance is committed at that endpoint as one Session-state transition:
+
+1. Highest Accepted Generation becomes G';
+2. the new incarnation becomes CURRENT(G');
+3. every lower Generation of that Carrier ID becomes SUPERSEDED;
+4. no new Transmission Attempt may be scheduled on a superseded incarnation;
+5. no new path-measurement sample may be attributed to a superseded incarnation;
+6. subsequently received Secure Records from a superseded incarnation MUST NOT create new protocol state;
+7. the transport of a superseded incarnation SHOULD be closed promptly.
+
+Frames from a lower Generation that were completely authenticated and processed before the commit keep their already-applied effects.
+
+### 4.6. Simultaneous candidates
+
+More than one candidate for the same Carrier ID may be handshaking concurrently.
+
+Candidates do not reserve a Generation merely by connecting or sending CLIENT_INIT.
+
+Each candidate is compared against the Highest Accepted Generation at its own establishment commit point.
+
+Therefore:
+
+- if two candidates use the same Generation, at most one can be accepted;
+- after one is accepted, the other equal candidate is CARRIER_CONFLICT;
+- a later candidate with a still-higher Generation may supersede a newly accepted lower Generation after it independently completes authentication.
+
+An implementation MUST NOT select a winner solely from unauthenticated transport arrival order.
+
+### 4.7. Replacement invariants
+
+Replacement MUST preserve Session identity and all Session-owned state, including:
+
+- Stream IDs and Stream offsets;
+- Stream opening and terminal state;
+- Stream and Session flow-control accounting;
+- the Session Scheduler ID;
+- allocated, outstanding, settled, and retired Transmission IDs;
+- tombstones and retired Stream identities.
+
+The replacement Carrier has new handshake nonces, new traffic secrets, new traffic keys, new IVs, and new per-direction Record Sequence Number spaces beginning at zero.
+
+Outstanding reliable Transmissions remain eligible for normal retransmission or reinjection and retain their Transmission IDs.
+
+Generation values never wrap. If the Highest Accepted Generation is 2^62 - 1, that Carrier ID has no further valid replacement Generation in the Session.
+
 ## 5. Stream opening states
 
 A Stream has an opening state independent of its two data directions.
@@ -150,7 +252,7 @@ While in OPENING, the Client MUST tolerate the following inbound Frames as **acc
 - RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
 
-Draft 03 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 04 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -453,7 +555,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 03 implementation MUST:
+A conforming Draft 04 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;
@@ -465,4 +567,10 @@ A conforming Draft 03 implementation MUST:
 - never recreate application state for a tombstoned or retired Stream ID;
 - allow late data below a FIN final size to fill earlier holes;
 - never deliver post-reset duplicate data to the application;
-- distinguish stale settled acknowledgements from never-allocated Transmission IDs.
+- distinguish stale settled acknowledgements from never-allocated Transmission IDs;
+- retain Highest Accepted Generation for every used Carrier ID;
+- reject equal-Generation reuse even after transport loss;
+- commit higher Generation only after candidate Carrier establishment;
+- prevent superseded Carriers from receiving new Attempts or creating new protocol state;
+- preserve Session-owned state across Carrier replacement;
+- apply the Error Code failure scopes defined in ERROR-HANDLING.md.

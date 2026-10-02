@@ -10,7 +10,8 @@ An extension should define:
 - registry allocations;
 - endpoint state transitions;
 - interaction with flow control, retransmission, and reinjection;
-- error handling;
+- error handling and the failure scope of every new Error Code;
+- whether each new Error Code is valid in STREAM_OPEN_REJECT, CARRIER_CLOSE, or SESSION_CLOSE;
 - security considerations;
 - interoperability examples or test vectors.
 

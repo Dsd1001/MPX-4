@@ -4,11 +4,11 @@
 
 This document describes security requirements and operational guidance for MPX/4 implementations.
 
-Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
+Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), and [ERROR-HANDLING.md](ERROR-HANDLING.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 03 security profile
+## Draft 04 security profile
 
-The mandatory-to-implement Draft 03 profile uses:
+The mandatory-to-implement Draft 04 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -43,7 +43,7 @@ A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 03 profile does not provide forward secrecy.
+The mandatory Draft 04 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -74,7 +74,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 03 uses a per-direction Record Sequence Number beginning at zero.
+Draft 04 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -82,7 +82,7 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 03 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 04 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -92,9 +92,13 @@ A complete old Carrier handshake cannot validly replace a newer Carrier incarnat
 
 Implementations MUST enforce Carrier Generation rules:
 
-- a lower Generation than an already accepted Generation is stale;
-- a conflicting equal live Generation is rejected;
-- a higher authenticated Generation supersedes older state for that Carrier ID.
+- the first accepted incarnation of an unused Carrier ID uses Generation 0;
+- a lower Generation than Highest Accepted Generation is stale;
+- an equal Generation is rejected even after the earlier transport is lost, because an accepted Carrier-incarnation tuple is never reusable;
+- a higher Generation does not supersede anything until the candidate Carrier is fully authenticated and accepted;
+- a higher accepted Generation supersedes all lower Generations for that Carrier ID;
+- superseded Carriers are not eligible for new Attempts or path-measurement samples;
+- Generation values never wrap.
 
 Reliable Transmission IDs are Session-wide and are never reused.
 
@@ -102,7 +106,7 @@ Retransmission and reinjection repeat the same Transmission ID. If the same Tran
 
 ## Stream-data integrity
 
-Draft 03 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 04 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -164,11 +168,13 @@ Implementations SHOULD:
 
 ## Error handling
 
-Protocol errors SHOULD fail closed.
+Failure scope is normative in [ERROR-HANDLING.md](ERROR-HANDLING.md).
 
-Carrier-scoped failures SHOULD terminate only the affected Carrier when shared Session state remains valid.
+Carrier-scoped authentication, integrity, or Frame-encoding failures terminate only the affected Carrier and MUST NOT invalidate other authenticated Carriers merely because they share the Session.
 
-Session-state contradictions, including flow-control violations and conflicting Stream data, require Session termination.
+Session-scoped failures, including flow-control violations, final-size contradictions, and impossible Transmission identity, require a Session-wide transition to CLOSING and SESSION_CLOSE when an authenticated writable Carrier is available.
+
+A candidate JOIN failure MUST NOT mutate existing Session state, advance Carrier Generation, or supersede an authenticated Carrier.
 
 Diagnostic reason strings are non-normative and MUST NOT control protocol behavior.
 
@@ -180,8 +186,11 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 03 key derivation and Finished authentication;
-- Draft 03 Secure Record encryption.
+- Draft 04 key derivation and Finished authentication;
+- Draft 04 Secure Record encryption;
+- Stream state validity;
+- Carrier Generation replacement state;
+- Error Code failure scope.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
 
@@ -215,7 +224,7 @@ State compaction MUST NOT refund or recreate Session credit.
 
 ## TCP binding security
 
-The Draft 03 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+The Draft 04 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
 
 Every TCP Carrier performs the full MPX authentication handshake.
 

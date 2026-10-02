@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 03  
+**Revision:** Draft 04
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 03 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 03 state rules, and the TCP binding.
+Two implementations satisfy the Draft 04 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 04 state rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -313,15 +313,35 @@ The failed logical Carrier rejoins on a new TCP connection using a higher Genera
 
 ### J4. Fresh cryptographic state
 
-The replacement Carrier performs a complete handshake, derives fresh traffic keys, and begins Record Sequence Number 0.
+The replacement Carrier performs a complete handshake, derives fresh traffic keys and IVs, and begins Record Sequence Number 0 in each direction.
 
-### J5. Stale Generation
+### J5. Failed candidate is non-mutating
 
-A lower Carrier Generation is rejected.
+A higher-Generation candidate that fails authentication or JOIN validation does not advance Highest Accepted Generation and does not supersede the current Carrier.
 
-### J6. Equal live Generation conflict
+### J6. Stale Generation
 
-A simultaneous equal-Generation Carrier conflict is rejected with CARRIER_CONFLICT.
+A lower Carrier Generation is rejected with CARRIER_CONFLICT.
+
+### J7. Equal Generation is never reusable
+
+An equal Generation is rejected with CARRIER_CONFLICT even after the previously accepted transport for that Generation has been lost or closed.
+
+### J8. First incarnation uses Generation 0
+
+An unused Carrier ID accepts Generation 0 as its first incarnation and rejects a non-zero first Generation with CARRIER_CONFLICT.
+
+### J9. Atomic supersession
+
+After a higher Generation reaches ESTABLISHED, lower Generations of that Carrier ID become superseded. New Attempts and path-measurement samples are not assigned to the superseded incarnation, and Secure Records received from it after the Generation commit do not create new protocol state.
+
+### J10. Session-state preservation
+
+Replacement preserves Stream state, flow-control state, Session Scheduler ID, tombstones, retired Stream IDs, and the Session-wide Transmission-ID namespace. Reinjection over the replacement Carrier retains the original Transmission ID.
+
+### J11. Simultaneous candidates
+
+Two concurrent candidates using the same higher Generation cannot both become accepted incarnations. A later still-higher authenticated Generation can supersede a newly accepted lower Generation.
 
 ## 14. Group K — Close behavior
 
@@ -364,7 +384,19 @@ At minimum, the receiver is tested with:
 - conflicting Transmission-ID reuse;
 - Stream lifecycle violation.
 
-The endpoint returns or internally records the error class required by the specification and applies the correct Carrier or Session scope.
+The endpoint returns or internally records the error class required by the specification and applies the failure scope required by ERROR-HANDLING.md.
+
+The Mandatory negative suite also verifies:
+
+- STREAM_LIMIT on STREAM_OPEN produces STREAM_OPEN_REJECT and does not close the Session;
+- a rejected JOIN with CARRIER_CONFLICT does not advance Generation or modify the existing Session;
+- Secure Record authentication failure terminates only the affected Carrier;
+- FRAME_ENCODING_ERROR terminates only the affected Carrier when the error is safely reportable after establishment;
+- FLOW_CONTROL_ERROR produces Session-scoped shutdown;
+- FINAL_SIZE_ERROR produces Session-scoped shutdown;
+- TRANSMISSION_ID_ERROR produces Session-scoped shutdown;
+- Session-scoped shutdown blocks new Streams and new Carrier JOINs across every Carrier;
+- Trigger Frame Type identifies the offending decoded Frame when one is known.
 
 ## 16. Group M — Scheduler profiles
 
@@ -374,11 +406,17 @@ Core interoperability does not require two implementations to make identical sch
 
 For each supported Scheduler ID, implementations SHOULD verify that:
 
-- the Scheduler value is negotiated correctly;
+- the Scheduler value is negotiated correctly and remains Session-wide;
 - the scheduler never violates reliability or flow control;
+- a closing, superseded, or locally unusable Carrier is not selected for a new Attempt;
+- retransmission or reinjection preserves the Transmission ID;
+- AGGREGATE does not reserve all alternate Carriers exclusively for failure-only backup by definition;
+- PROTECT keeps alternate eligible Carriers available for protection or recovery even when ordinary traffic prefers another Carrier;
+- WEIGHTED requires PATH_CAPACITY on every Carrier and treats configured capacity as scheduling input rather than flow-control credit;
+- AUTO does not require another implementation to make the same local policy switch or Carrier choice;
 - Carrier loss does not corrupt Stream semantics.
 
-Scheduler-specific deterministic test profiles can be published independently.
+Two conforming Core implementations are not required to make identical Carrier choices. Scheduler-specific deterministic test profiles can be published independently.
 
 ## 17. Group N — Resource behavior
 
@@ -401,7 +439,7 @@ Resource pressure must not create wire behavior that violates the Core protocol.
 A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
-    Revision: Draft 03
+    Revision: Draft 04
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -423,8 +461,8 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 03 preserves Draft 02 Core wire encodings.
+Draft 04 preserves Draft 03 Core wire encodings and cryptographic vectors.
 
-Draft 03 adds a normative TCP binding and a common interoperability profile.
+Draft 04 makes Carrier Generation replacement, Error Code failure scope, Carrier-specific PING/PONG measurement semantics, and Scheduler contracts more precise. It adds no new Core Frame or Parameter numeric assignment.
 
-An implementation can therefore retain its Draft 02 encoder and cryptographic vectors while adding the TCP-binding and interoperability behavior required here.
+A Draft 03 implementation can therefore retain its wire encoder, decoder, and cryptographic vectors while adding the tightened Generation, error-scope, measurement, and Scheduler semantics required by Draft 04.

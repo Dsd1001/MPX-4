@@ -14,13 +14,12 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 03  
+**Specification revision:** Draft 04
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
 - [Normative State Machines and Frame Validity](STATE-MACHINES.md)
-- [MPX/4 over TCP](bindings/tcp.md)
-- [Interoperability Profile](INTEROPERABILITY.md)
+- [Normative Error Handling and Failure Scope](ERROR-HANDLING.md)
 - [MPX/4 over TCP](bindings/tcp.md)
 - [Interoperability Profile](INTEROPERABILITY.md)
 - [Protocol Registries](REGISTRIES.md)
@@ -59,7 +58,6 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Retransmission and reinjection example](examples/reliability.md)
 - [Terminal Stream lifecycle example](examples/terminal-lifecycle.md)
 - [TCP Carrier example](examples/tcp-carrier.md)
-- [TCP Carrier example](examples/tcp-carrier.md)
 
 ### Test vectors
 
@@ -69,10 +67,11 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Key schedule and Finished vector](test-vectors/key-schedule.json)
 - [Secure Record vector](test-vectors/secure-record.json)
 - [State validity cases](test-vectors/state-validity.json)
-- [TCP binding framing cases](test-vectors/tcp-binding.json)
+- [Carrier Generation cases](test-vectors/carrier-generation.json)
+- [Error-scope cases](test-vectors/error-scope.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
-Test vectors are intended to let independent implementations verify identical wire encodings and cryptographic derivations.
+Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, cryptographic derivations, lifecycle behavior, Carrier Generation semantics, and failure scope.
 
 ## Extension points
 
@@ -107,6 +106,7 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     ├── README.md
     ├── SPECIFICATION.md
     ├── STATE-MACHINES.md
+    ├── ERROR-HANDLING.md
     ├── INTEROPERABILITY.md
     ├── REGISTRIES.md
     ├── SECURITY.md
@@ -131,6 +131,8 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── key-schedule.json
     │   ├── secure-record.json
     │   ├── state-validity.json
+    │   ├── carrier-generation.json
+    │   ├── error-scope.json
     │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/

@@ -52,6 +52,8 @@ An extension specification SHOULD state:
 - how support is negotiated;
 - whether support is optional or required;
 - which new registry values it consumes;
+- the failure scope of every new Error Code it defines;
+- whether each new Error Code is valid in STREAM_OPEN_REJECT, CARRIER_CLOSE, or SESSION_CLOSE;
 - how an endpoint behaves when the extension is unsupported;
 - interaction with flow control, retransmission, and connection closure;
 - security and resource-consumption implications.
@@ -63,6 +65,10 @@ Extensions MUST NOT silently reinterpret existing Core fields.
 Changes to wire encoding SHOULD include machine-readable test vectors when practical.
 
 Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD update [STATE-MACHINES.md](STATE-MACHINES.md) and `test-vectors/state-validity.json` when the affected behavior can be expressed as a conformance case.
+
+Changes to Carrier Generation or replacement semantics SHOULD update `test-vectors/carrier-generation.json`.
+
+Changes to Error Code scope or close behavior SHOULD update [ERROR-HANDLING.md](ERROR-HANDLING.md) and `test-vectors/error-scope.json`.
 
 Changes to TCP transport mapping SHOULD update `bindings/tcp.md`, `test-vectors/tcp-binding.json`, and the relevant Mandatory group in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 

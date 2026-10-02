@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 03",
+  "revision": "Draft 04",
   "representation": "decrypted Frame bytes before Secure Record encryption",
   "vectors": [
     {

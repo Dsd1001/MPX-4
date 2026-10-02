@@ -1,6 +1,6 @@
 # MPX/4 Retransmission and Reinjection Example
 
-This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 03.
+This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 04.
 
 ## 1. One logical Transmission
 
@@ -76,4 +76,4 @@ An acknowledgement is most useful for path measurement when:
 - the Transmission has only one Attempt; and
 - the acknowledgement returns on the same Carrier.
 
-Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 03 does not treat it as an unambiguous per-Carrier delivery-rate sample.
+Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 04 does not treat it as an unambiguous per-Carrier delivery-rate sample.

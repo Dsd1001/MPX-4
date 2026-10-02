@@ -1,7 +1,7 @@
 # MPX/4 Core Protocol Specification
 
 **Document:** MPX/4 Core Protocol  
-**Revision:** Draft 03  
+**Revision:** Draft 04
 **Protocol Version:** 4  
 **Status:** Working Draft
 
@@ -98,7 +98,7 @@ MPX/4 Core is defined independently of transport packet boundaries.
 
 A transport binding specifies how one MPX Carrier maps onto an underlying ordered transport, including connection establishment, byte-stream parsing, transport loss, replacement, and close behavior.
 
-The normative baseline binding for Draft 03 is:
+The normative baseline binding for Draft 04 is:
 
 - [MPX/4 over TCP](bindings/tcp.md)
 
@@ -190,7 +190,7 @@ Each handshake message is:
     Message Length      VarInt
     Message Body        Message Length octets
 
-Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 03.
+Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 04.
 
 ### 7.2. Parameter format
 
@@ -203,7 +203,7 @@ CLIENT_INIT and SERVER_INIT contain Parameters:
 
 Bit 0 of Flags is CRITICAL. Bits 1 through 7 are reserved and MUST be zero.
 
-Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 03.
+Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 04.
 
 An endpoint receiving an unknown Parameter with CRITICAL=0 MUST ignore its value after validating its encoded length.
 
@@ -230,7 +230,7 @@ CREATE establishes a new Session. JOIN attaches a new authenticated Carrier to a
 
 ### 8.3. CARRIER_ID and CARRIER_GENERATION
 
-CARRIER_ID is a VarInt in the range 1 through 8 in Draft 03.
+CARRIER_ID is a VarInt in the range 1 through 8 in Draft 04.
 
 CARRIER_GENERATION is a VarInt. The first transport instance of a Carrier ID uses Generation 0. A replacement transport for the same Carrier ID uses a strictly greater Generation.
 
@@ -248,7 +248,7 @@ SERVER_NONCE appears only in SERVER_INIT.
 
 MAX_FRAME_PAYLOAD is the maximum STREAM_DATA Data field, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 03 values are 1 through 32768.
+Valid Draft 04 values are 1 through 32768.
 
 A peer MUST NOT send a larger STREAM_DATA Data field.
 
@@ -256,7 +256,7 @@ A peer MUST NOT send a larger STREAM_DATA Data field.
 
 MAX_RECORD_SIZE is the maximum Secure Record plaintext length, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 03 values are 1024 through 65536.
+Valid Draft 04 values are 1024 through 65536.
 
 The record header and 16-octet AEAD tag are not included in this value.
 
@@ -266,7 +266,7 @@ A sender MUST ensure that each complete Frame fits within one Secure Record and 
 
 MAX_STREAMS is the maximum number of simultaneously active peer-initiated Streams that the sender of the Parameter is willing to maintain.
 
-Valid Draft 03 values are 1 through 2048.
+Valid Draft 04 values are 1 through 2048.
 
 Stream IDs are not bounded by MAX_STREAMS; the value limits concurrency.
 
@@ -334,11 +334,51 @@ The Server MUST NOT attach unauthenticated Carrier state to a live Session befor
 
 A JOIN uses the same SESSION_ID, SESSION_ACTION=JOIN, a Carrier ID, Generation, fresh CLIENT_NONCE, receive limits, and the existing Session Scheduler. Session-scoped receive limits MUST match the values already established for that endpoint; MAX_RECORD_SIZE MAY differ for the new Carrier.
 
-A higher accepted Generation supersedes any lower Generation for the same Carrier ID. A lower Generation is stale and MUST be rejected. An equal Generation that conflicts with an already accepted live Carrier MUST be rejected with CARRIER_CONFLICT.
+### 9.1. Carrier Generation acceptance and replacement
+
+For every Carrier ID that has ever reached ESTABLISHED in a Session, each endpoint MUST retain the Highest Accepted Generation for that Carrier ID for at least the lifetime of the Session.
+
+For a Carrier ID with no previously accepted incarnation, the first accepted Generation MUST be 0. A candidate using a non-zero first Generation MUST be rejected with CARRIER_CONFLICT.
+
+Let H be the Highest Accepted Generation for a Carrier ID and let G be the Generation carried by a candidate JOIN:
+
+- if G < H, the candidate is stale and MUST be rejected with CARRIER_CONFLICT;
+- if G = H, the candidate attempts to reuse an already accepted Carrier incarnation and MUST be rejected with CARRIER_CONFLICT, whether or not the earlier transport is still live;
+- if G > H, the candidate is eligible to replace the current incarnation.
+
+A candidate replacement MUST NOT advance H, supersede an existing Carrier, or alter Session state before that candidate completes authentication and all Session-scoped JOIN parameters are validated.
+
+When a candidate with G > H reaches ESTABLISHED, the endpoint atomically sets H = G. Every lower Generation of the same Carrier ID becomes superseded at that endpoint.
+
+A superseded Carrier:
+
+- MUST NOT receive new Transmission Attempts;
+- MUST NOT contribute new path-measurement samples;
+- MUST NOT change the current Carrier Generation;
+- SHOULD have its underlying transport closed promptly.
+
+Frames already authenticated and completely processed before the Generation advance retain their normal effects. After the Generation advance is committed, an endpoint MUST NOT process subsequently received Secure Records from a lower Generation of that Carrier ID as new protocol state.
+
+Failure of a candidate handshake MUST NOT advance H and MUST NOT supersede the current Carrier.
+
+If H equals the maximum MPX VarInt value, that Carrier ID cannot be replaced again within the Session. Generation values MUST NOT wrap.
+
+Replacement changes Carrier incarnation only. It MUST NOT reset or renumber:
+
+- Stream IDs;
+- Stream offsets;
+- Stream or Session credit;
+- Transmission IDs;
+- settled or outstanding reliable Transmission state;
+- the Session Scheduler ID.
+
+Outstanding reliable Transmissions MAY be retransmitted or reinjected over the replacement Carrier using their existing Transmission IDs.
+
+The complete replacement state machine is defined in [STATE-MACHINES.md](STATE-MACHINES.md). Transport bindings define how a new underlying connection is established but MUST preserve these Core Generation rules.
 
 ## 10. MPX/4 key schedule
 
-Draft 03 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
+Draft 04 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
 
 ### 10.1. MPX-Expand-Label
 
@@ -493,7 +533,7 @@ Wire format:
 
 ### 11.1. Record Flags
 
-Draft 03 defines no Record Flags.
+Draft 04 defines no Record Flags.
 
 Senders MUST transmit 0x00.
 
@@ -517,7 +557,7 @@ The sequence number increments by one after every successfully generated or auth
 
 The sequence number is not transmitted.
 
-Draft 03 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
+Draft 04 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
 
 ### 11.4. Nonce construction
 
@@ -562,7 +602,7 @@ Unknown Frame handling is determined by the registered range:
 - unknown values in the Core range 0x00 through 0x3f are a PROTOCOL_VIOLATION;
 - unknown values in the Extension range 0x40 through 0x3fff MUST be skipped by Frame Length unless a negotiated extension specifies stronger behavior;
 - values in the Private Use range 0x4000 through 0x7fff are valid only under an explicitly negotiated private profile;
-- all higher values are reserved and MUST be rejected in Draft 03.
+- all higher values are reserved and MUST be rejected in Draft 04.
 
 ### 12.2. PADDING
 
@@ -602,7 +642,7 @@ A duplicate of an already processed reliable Transmission MUST be processed idem
 
 ## 14. Stream identifiers and opening
 
-Draft 03 supports Client-initiated bidirectional Streams.
+Draft 04 supports Client-initiated bidirectional Streams.
 
 Client Stream IDs are positive odd integers allocated monotonically:
 
@@ -647,6 +687,8 @@ Body:
 The Transmission ID echoes the STREAM_OPEN Transmission ID.
 
 A rejection is final for that Stream ID.
+
+Core rejection reasons and their scope are defined in [ERROR-HANDLING.md](ERROR-HANDLING.md). STREAM_LIMIT and Stream-specific RESOURCE_LIMIT are valid Core rejection reasons. STREAM_STATE_ERROR is valid when Core state rules explicitly require rejection of that Stream ID without closing the Session. NO_ERROR MUST NOT be used in STREAM_OPEN_REJECT.
 
 ## 15. Stream data and reassembly
 
@@ -723,7 +765,7 @@ Consumed Offset and Maximum Offset MUST be monotonically non-decreasing.
 
 Maximum Offset MUST be greater than or equal to Consumed Offset.
 
-Draft 03 limits:
+Draft 04 limits:
 
     Maximum Offset - Consumed Offset <= 16 MiB
 
@@ -756,7 +798,7 @@ Both values MUST be monotonically non-decreasing.
 
 Maximum Bytes MUST be greater than or equal to Consumed Bytes.
 
-Draft 03 limits:
+Draft 04 limits:
 
     Maximum Bytes - Consumed Bytes <= 128 MiB
 
@@ -855,9 +897,13 @@ PONG body:
 
 A PONG MUST echo the PING Token.
 
-A PONG SHOULD be returned on the same Carrier on which the PING was received.
+A PONG, when sent, MUST be returned on the same Carrier on which the corresponding PING was received. Core implementations MUST NOT reroute that PONG onto another Carrier.
 
-PING/PONG is Carrier-scoped and MAY be used for Carrier RTT estimation. It has no Stream or Session flow-control effect.
+PING/PONG is Carrier-scoped and MAY be used for Carrier liveness and RTT estimation. For a PING/PONG exchange to be used as a path-specific RTT sample, the sender MUST be able to associate the echoed Token with exactly one outstanding PING on that Carrier.
+
+PING/PONG has no Stream or Session flow-control effect.
+
+Core does not define a probing interval, timeout count, smoothing algorithm, path-quality threshold, or background probe schedule. Those are local implementation policy and MUST NOT affect wire interoperability.
 
 ## 21. Carrier and Session closure
 
@@ -886,26 +932,23 @@ After SESSION_CLOSE is processed, no new Streams or Carriers may be created for 
 
 A sender MAY transmit SESSION_CLOSE on more than one active Carrier to improve delivery of the terminal state.
 
-## 22. Error scope
+## 22. Error handling and failure scope
 
-Errors confined to one Carrier SHOULD terminate that Carrier without unnecessarily terminating the Session. Examples include:
+The normative Error Code scopes, required CARRIER_CLOSE / SESSION_CLOSE actions, pre-establishment rejection rules, Trigger Frame Type rules, and extension requirements are defined in [ERROR-HANDLING.md](ERROR-HANDLING.md).
 
-- Secure Record authentication failure;
-- stale or conflicting Carrier Generation during JOIN;
-- transport framing failure limited to one Carrier.
+That document is part of the MPX/4 Core specification.
 
-Errors that invalidate shared Session or Stream state MUST terminate the Session. Examples include:
+In summary:
 
-- FLOW_CONTROL_ERROR caused by exceeded shared credit;
-- STREAM_STATE_ERROR caused by an impossible Stream lifecycle transition;
-- FINAL_SIZE_ERROR caused by contradictory final-size semantics;
-- TRANSMISSION_ID_ERROR caused by conflicting or impossible Transmission identity;
-- conflicting Stream bytes at the same offset;
-- invalid Session-wide scheduler state.
+- a Stream-opening-scoped error rejects only that STREAM_OPEN;
+- a Carrier-scoped error invalidates only the affected Carrier incarnation;
+- a Session-scoped error MUST transition the Session to CLOSING and MUST cause SESSION_CLOSE when an authenticated writable Carrier is available;
+- rejecting a candidate JOIN MUST NOT modify an existing Session;
+- FLOW_CONTROL_ERROR, FINAL_SIZE_ERROR, and TRANSMISSION_ID_ERROR are Session-scoped;
+- FRAME_ENCODING_ERROR and authentication/integrity failure are Carrier-scoped;
+- STREAM_STATE_ERROR is Session-scoped except where Core explicitly defines STREAM_OPEN_REJECT as the narrower action.
 
-The detailed state-error precedence and Stream lifecycle rules are defined in STATE-MACHINES.md.
-
-Before ESTABLISHED, authentication failure MAY be signaled only by transport closure.
+Error Code selection and failure scope are distinct. The deterministic error-code precedence remains defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
 ## 23. Carrier state and scheduling
 
@@ -922,13 +965,32 @@ Each Carrier maintains, at minimum:
 
 Carrier metrics are local implementation state unless explicitly exposed by an extension.
 
-The Session Scheduler selects a Carrier for each new Transmission and each later Attempt.
+The Session Scheduler selects an eligible Carrier for each new Transmission and each later Attempt.
 
-Draft 03 Scheduler IDs are AUTO, AGGREGATE, PROTECT, and WEIGHTED.
+A Carrier is eligible for new Attempts only while it is authenticated, ESTABLISHED, not closing, not superseded by a higher Generation, and considered usable by the local endpoint.
 
-The exact selection algorithm is implementation-defined unless a scheduler profile defines stronger interoperability requirements.
+Core Scheduler IDs are AUTO, AGGREGATE, PROTECT, and WEIGHTED.
 
-A scheduler MUST NOT violate Stream ordering, Session reliability, flow control, or the reliability rules in this document.
+Their protocol contracts are:
+
+- **AUTO** — the implementation dynamically selects a local operating policy from Session and Carrier state. Core does not standardize the switching algorithm or thresholds.
+- **AGGREGATE** — multiple eligible Carriers are available for ordinary traffic scheduling rather than being restricted to failure-only backup use. Core does not standardize a distribution ratio.
+- **PROTECT** — one or more Carriers may be preferred for ordinary traffic while alternate eligible Carriers remain available for protection, retransmission, reinjection, probing, or recovery. Core does not standardize the preferred-path selection or failover threshold.
+- **WEIGHTED** — PATH_CAPACITY is a required per-Carrier scheduling input. Configured capacity MUST NOT be interpreted as Stream credit, Session credit, a guaranteed delivery rate, or permission to violate live Carrier usability constraints.
+
+For WEIGHTED, Uplink Capacity Units equal to zero means that no configured uplink capacity is supplied for that Carrier. The implementation may derive a local uplink scheduling estimate without changing the negotiated Parameter value.
+
+The exact scheduling algorithm, score, weight normalization, RTT threshold, retry timer, probe cadence, queue model, and congestion-response policy are implementation-defined unless a separate negotiated scheduler profile defines stronger interoperability requirements.
+
+A scheduler MUST NOT:
+
+- change Stream byte identity;
+- change a Transmission ID during retransmission or reinjection;
+- create additional logical flow-control commitment for another Attempt;
+- schedule new Attempts on a closing, superseded, or unusable Carrier;
+- change the Session Scheduler ID without a new Session.
+
+Different conforming implementations are not required to choose the same Carrier for the same Transmission.
 
 ## 24. Retransmission and reinjection
 
@@ -958,7 +1020,7 @@ to estimate path behavior.
 
 A first-attempt STREAM_DATA acknowledgement returned on the same Carrier can provide a path-specific delivery sample.
 
-Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 03 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
+Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 04 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
 
 Delivery-rate estimation SHOULD avoid treating application-limited traffic as path capacity.
 
@@ -966,7 +1028,7 @@ Delivery-rate estimation SHOULD avoid treating application-limited traffic as pa
 
 The normative MPX/4 state machines, Frame-validity matrices, cross-Carrier reordering rules, terminal Stream rules, tombstone requirements, and retired-identity behavior are defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-That document is part of the MPX/4 Core specification for Draft 03.
+That document is part of the MPX/4 Core specification for Draft 04.
 
 In particular, conforming implementations MUST support:
 
@@ -982,7 +1044,7 @@ An implementation MAY use different internal state names or data structures, but
 
 ## 27. Resource limits
 
-Draft 03 Core limits are:
+Draft 04 Core limits are:
 
 | Limit | Value |
 |---|---:|
@@ -1032,7 +1094,7 @@ Implementations MUST validate lengths and integer arithmetic before allocation, 
 
 Implementations SHOULD bound unauthenticated handshake state, pending reliable Transmissions, receive buffering, and failed authentication work.
 
-Draft 03 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
+Draft 04 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
 
 ## 30. Wire-size considerations
 
@@ -1046,17 +1108,22 @@ MPX Frame and Secure Record sizes are protocol limits, not network MTUs. The und
 
 ## 31. Conformance requirements
 
-A conforming Draft 03 implementation MUST:
+A conforming Draft 04 implementation MUST:
 
 - recognize the MPX/4 Connection Preface;
 - reject non-canonical VarInts;
 - implement canonical Parameter ordering and duplicate rejection;
-- implement the Draft 03 key schedule exactly;
+- implement the Draft 04 key schedule exactly;
 - implement CLIENT_FINISHED and SERVER_FINISHED verification;
 - implement AES-256-GCM Secure Records with the specified nonce and AAD construction;
 - enforce peer receive limits;
 - implement the Core Frame set in REGISTRIES.md;
 - implement the normative state rules in STATE-MACHINES.md;
+- implement the failure scopes and required close actions in ERROR-HANDLING.md;
+- retain Highest Accepted Generation per used Carrier ID for the Session lifetime;
+- reject stale, equal-reuse, and invalid first Carrier Generations with CARRIER_CONFLICT;
+- commit a higher Carrier Generation only after successful Carrier establishment;
+- prevent superseded Carriers from creating new protocol state or receiving new Attempts;
 - preserve Transmission IDs across retransmission and reinjection;
 - never reuse a Transmission ID within a Session;
 - distinguish settled duplicate acknowledgements from never-allocated Transmission IDs;
@@ -1066,14 +1133,17 @@ A conforming Draft 03 implementation MUST:
 - preserve final-size invariants;
 - tolerate the specified cross-Carrier reordering cases;
 - retain terminal Stream state sufficient to prevent Stream-ID reuse;
-- distinguish Carrier-scoped and Session-scoped closure;
+- distinguish Stream-opening-, Carrier-, and Session-scoped failures;
+- send SESSION_CLOSE for Session-scoped errors when an authenticated writable Carrier is available;
+- keep PING/PONG path measurement Carrier-specific;
+- obey the semantic contract of the negotiated Scheduler ID without requiring a standardized scheduling algorithm;
 - implement at least one conforming transport binding;
 - when claiming TCP interoperability, implement bindings/tcp.md;
-- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 03 Core interoperability claim.
+- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 04 Core interoperability claim.
 
 ## 32. Future work
 
-The following remain outside Draft 03:
+The following remain outside Draft 04:
 
 - ephemeral key exchange and forward secrecy;
 - datagram transport;
@@ -1083,7 +1153,7 @@ The following remain outside Draft 03:
 - forward error correction;
 - explicit Carrier migration;
 - additional scheduler profiles;
-- additional transport bindings beyond the Draft 03 TCP baseline.
+- additional transport bindings beyond the Draft 04 TCP baseline.
 
 ## 33. Normative references
 
@@ -1110,7 +1180,7 @@ An interoperable MPX/4 implementation preserves these invariants:
 9. Frame semantics do not depend on underlying packet boundaries.
 10. Wire registry values are stable within a protocol version.
 
-## Appendix B. Draft 03 wire constants
+## Appendix B. Draft 04 wire constants
 
     Protocol magic                     4d 50 58 00
     Protocol version                   4

@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 03
+**Registry Revision:** Draft 04
 
 This document records numeric assignments used by the MPX/4 Core Protocol.
 
@@ -94,29 +94,31 @@ Private Use values require an explicitly negotiated private profile and are not 
 
 ## 5. Error Codes
 
-| Value | Name | Meaning |
-|---:|---|---|
-| 0x00 | NO_ERROR | Graceful closure |
-| 0x01 | INTERNAL_ERROR | Local implementation failure |
-| 0x02 | PROTOCOL_VIOLATION | Invalid protocol state or semantics |
-| 0x03 | AUTHENTICATION_FAILED | Authentication failed |
-| 0x04 | VERSION_UNSUPPORTED | Requested version unsupported |
-| 0x05 | RESOURCE_LIMIT | Local resource bound reached |
-| 0x06 | SESSION_NOT_FOUND | Requested Session does not exist |
-| 0x07 | SESSION_CONFLICT | Session identity conflicts with existing state |
-| 0x08 | STREAM_LIMIT | Maximum active Stream count exceeded |
-| 0x09 | FLOW_CONTROL_ERROR | Peer exceeded advertised credit |
-| 0x0a | FRAME_ENCODING_ERROR | Malformed Frame encoding |
-| 0x0b | SCHEDULER_MISMATCH | Scheduler policy incompatible |
-| 0x0c | CARRIER_CONFLICT | Carrier ID or Generation conflict |
-| 0x0d | UNSUPPORTED_PARAMETER | Unknown critical Parameter |
-| 0x0e | STREAM_STATE_ERROR | Frame is impossible in the current Stream lifecycle state |
-| 0x0f | FINAL_SIZE_ERROR | Frame contradicts the established Stream final size |
-| 0x10 | TRANSMISSION_ID_ERROR | Transmission identity is conflicting or impossible |
-| 0x11–0x3f | — | Core-reserved |
-| 0x40–0x3fff | — | Extension |
-| 0x4000–0x7fff | — | Private Use |
-| 0x8000–2^62-1 | — | Reserved |
+| Value | Name | Meaning | Core failure scope |
+|---:|---|---|---|
+| 0x00 | NO_ERROR | Graceful closure | Closure signal |
+| 0x01 | INTERNAL_ERROR | Local implementation failure | Contextual |
+| 0x02 | PROTOCOL_VIOLATION | Invalid protocol state or semantics | Carrier before ESTABLISHED; Session after ESTABLISHED |
+| 0x03 | AUTHENTICATION_FAILED | Authentication failed | Carrier |
+| 0x04 | VERSION_UNSUPPORTED | Requested version unsupported | Pre-establishment Carrier |
+| 0x05 | RESOURCE_LIMIT | Local resource bound reached | Contextual |
+| 0x06 | SESSION_NOT_FOUND | Requested Session does not exist | Pre-establishment Carrier |
+| 0x07 | SESSION_CONFLICT | Session identity conflicts with existing state | Pre-establishment Carrier |
+| 0x08 | STREAM_LIMIT | Maximum active Stream count exceeded | Stream opening |
+| 0x09 | FLOW_CONTROL_ERROR | Peer exceeded advertised credit | Session |
+| 0x0a | FRAME_ENCODING_ERROR | Malformed Frame encoding | Carrier |
+| 0x0b | SCHEDULER_MISMATCH | Scheduler policy incompatible | Pre-establishment Carrier |
+| 0x0c | CARRIER_CONFLICT | Carrier ID or Generation conflict | Pre-establishment Carrier |
+| 0x0d | UNSUPPORTED_PARAMETER | Unknown critical Parameter | Pre-establishment Carrier |
+| 0x0e | STREAM_STATE_ERROR | Frame is impossible in the current Stream lifecycle state | Session, except explicit STREAM_OPEN rejection cases |
+| 0x0f | FINAL_SIZE_ERROR | Frame contradicts the established Stream final size | Session |
+| 0x10 | TRANSMISSION_ID_ERROR | Transmission identity is conflicting or impossible | Session |
+| 0x11–0x3f | — | Core-reserved | Defined on assignment |
+| 0x40–0x3fff | — | Extension | Defined by extension |
+| 0x4000–0x7fff | — | Private Use | Defined by private profile |
+| 0x8000–2^62-1 | — | Reserved | — |
+
+Failure scope is part of the Error Code semantics. The complete required actions are defined in [ERROR-HANDLING.md](ERROR-HANDLING.md).
 
 AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close an unauthenticated Carrier without sending a wire error before ESTABLISHED.
 
@@ -138,7 +140,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 03 |
+| 1–7 | RESERVED | MUST be zero in Draft 04 |
 
 ## 8. Registry stability
 

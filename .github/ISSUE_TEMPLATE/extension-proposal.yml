@@ -45,6 +45,13 @@ body:
     validations:
       required: true
   - type: textarea
+    id: errors
+    attributes:
+      label: Error handling and failure scope
+      description: For each new Error Code, state its failure scope and whether it is valid in STREAM_OPEN_REJECT, CARRIER_CLOSE, or SESSION_CLOSE.
+    validations:
+      required: true
+  - type: textarea
     id: security
     attributes:
       label: Security and resource considerations

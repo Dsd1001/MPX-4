@@ -1,6 +1,6 @@
 # MPX/4 TCP Carrier Example
 
-This example illustrates the MPX/4 Draft 03 TCP binding.
+This example illustrates the MPX/4 Draft 04 TCP binding.
 
 ## 1. TCP connect
 
@@ -99,3 +99,29 @@ Carrier Generation = previous Generation + 1
 It sends a new Connection Preface, completes a new authenticated handshake, derives fresh traffic keys, and starts new Record Sequence Numbers at zero.
 
 No partial byte stream or record sequence is resumed from the failed TCP connection.
+
+## 7. Generation acceptance
+
+Assume Carrier ID 2 has Highest Accepted Generation 4.
+
+A replacement candidate with Generation 4 is rejected even if the Generation-4 TCP connection has already failed:
+
+```text
+Highest Accepted Generation = 4
+Candidate Generation        = 4
+Result                      = CARRIER_CONFLICT
+```
+
+The accepted incarnation tuple is never reused.
+
+A candidate with Generation 5 does not supersede Generation 4 merely by opening TCP or sending CLIENT_INIT. If authentication fails, Generation 4 remains the Highest Accepted Generation.
+
+Only after the Generation-5 Carrier reaches ESTABLISHED does the Session commit:
+
+```text
+Highest Accepted Generation = 5
+Generation 5                = current
+Generation 4                = superseded
+```
+
+Any outstanding Session Transmission keeps its existing Transmission ID if it is reinjected onto Generation 5.

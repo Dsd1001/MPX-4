@@ -4,6 +4,58 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
 
+## Draft 04 — 2026-10-03
+
+Draft 04 is a protocol-semantics and interoperability-precision revision. It preserves Draft 03 Core wire encodings, cryptographic derivations, Frame and Parameter assignments, and TCP binding framing.
+
+### Added
+
+- Normative [ERROR-HANDLING.md](ERROR-HANDLING.md) defining Stream-opening, Carrier, Session, and pre-establishment failure scopes.
+- A complete Core Carrier Generation acceptance and replacement state machine.
+- Highest Accepted Generation retention rules for each used Carrier ID.
+- Atomic higher-Generation commit semantics after authenticated Carrier establishment.
+- Explicit superseded-Carrier behavior.
+- Generation exhaustion and no-wrap semantics.
+- Protocol-level Scheduler contracts for AUTO, AGGREGATE, PROTECT, and WEIGHTED without standardizing implementation algorithms.
+- Machine-readable [carrier-generation.json](test-vectors/carrier-generation.json) conformance cases.
+- Machine-readable [error-scope.json](test-vectors/error-scope.json) conformance cases.
+
+### Clarified
+
+- The first accepted incarnation of an unused Carrier ID uses Generation 0.
+- Equal Generation is always a Carrier-incarnation reuse conflict, even after the earlier transport is lost or closed.
+- A failed replacement candidate does not advance Generation and does not mutate the existing Session.
+- A higher Generation supersedes lower Generations only after the candidate reaches ESTABLISHED.
+- Superseded Carriers receive no new Attempts, contribute no new path samples, and cannot create new protocol state after Generation commit.
+- Replacement preserves Stream state, flow-control state, tombstones, retired identities, Scheduler ID, and the Session-wide Transmission-ID namespace.
+- PONG is returned on the same Carrier as its PING when a response is sent; Core does not define probe cadence, timeout count, or path-quality thresholds.
+- STREAM_OPEN_REJECT Core reasons and their failure scope.
+- FLOW_CONTROL_ERROR, FINAL_SIZE_ERROR, and TRANSMISSION_ID_ERROR are Session-scoped.
+- FRAME_ENCODING_ERROR and authentication/integrity failure are Carrier-scoped.
+- Candidate JOIN errors do not alter an existing Session.
+- SESSION_CLOSE is required for Session-scoped errors when an authenticated writable Carrier is available.
+- Scheduler algorithms, scoring functions, weight normalization, retry timers, probe intervals, queue models, and congestion policies remain implementation-defined.
+
+### Interoperability
+
+Draft 04 extends the Mandatory Carrier-replacement and negative-protocol test groups with:
+
+- first-Generation validation;
+- equal-Generation non-reuse after loss;
+- failed-candidate non-mutation;
+- superseded-Carrier rejection behavior;
+- replacement preservation of Session state;
+- exact Core error scopes and close actions;
+- Session-error atomicity across multiple Carriers.
+
+### Compatibility
+
+Draft 04 is wire-compatible with Draft 03.
+
+No new Core Frame Type, Handshake Parameter Type, Error Code, or Scheduler ID is allocated by this revision.
+
+Implementations that already encode Draft 03 correctly can advance to Draft 04 without changing the MPX/4 wire codec or cryptographic vectors, but must implement the tightened Carrier Generation, error-scope, measurement, and Scheduler semantic rules.
+
 ## Draft 03 — 2026-10-03
 
 Draft 03 adds the normative TCP transport binding and a common interoperability profile. It does not change the Draft 02 Core Frame layouts, Secure Record cryptography, Stream state semantics, or existing registry assignments.
