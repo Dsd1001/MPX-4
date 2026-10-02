@@ -1,6 +1,6 @@
 # MPX/4 Frame Encoding Examples
 
-This document contains non-normative encoding examples for the MPX/4 Draft 01 Frame format.
+This document contains non-normative encoding examples for the MPX/4 Draft 02 Frame format.
 
 All hexadecimal examples use network byte order.
 
@@ -148,4 +148,4 @@ A Session-only credit probe is encoded as:
 
 The Frame Type is 0x21, Frame Length is 1, and Stream ID is 0. A non-zero Stream ID requests current Stream credit for that Stream together with current Session credit.
 
-The Draft 01 Secure Record test vector encrypts the STREAM_DATA example above as the first Client-to-Server record.
+The Draft 02 Secure Record test vector encrypts the STREAM_DATA example above as the first Client-to-Server record.
