@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 08",
+  "revision": "Draft 09",
   "document": "STATE-MACHINES.md",
   "cases": [
     {
@@ -42,7 +42,7 @@
       "frame": "STREAM_DATA",
       "expected": "session_error",
       "error": "STREAM_STATE_ERROR",
-      "notes": "Draft 04 has no implicit Stream data credit."
+      "notes": "Draft 09 has no implicit Stream data credit."
     },
     {
       "name": "zero-fin-overtakes-open-ok",
@@ -92,7 +92,7 @@
         "TRANSMISSION_ACK",
         "RESET_STREAM(final_offset=0)"
       ],
-      "notes": "A later STREAM_OPEN for the same Stream ID is rejected with STREAM_STATE_ERROR."
+      "notes": "Server RESET_STREAM(final_offset=0) is a cancellation response, not acceptance evidence. Later matching STREAM_OPEN_REJECT completes local cancellation."
     },
     {
       "name": "late-data-fills-fin-hole",
@@ -206,7 +206,10 @@
       "state": "RETIRED_ID",
       "frame": "STREAM_DATA",
       "expected": "ignore",
-      "notes": "Must not recreate Stream state or application delivery."
+      "notes": "Must not recreate Stream state, deliver application data, or send another confirmation after peer retirement covers the Transmission.",
+      "conditions": {
+        "transmission_id": "<= peer_retired_through"
+      }
     },
     {
       "name": "retired-open",
@@ -239,6 +242,83 @@
         "final_offset": "same as established final_offset"
       },
       "expected": "acknowledge_without_changing_reset_semantics"
+    },
+    {
+      "name": "opening-cancel-reset-response",
+      "state": "OPENING_CANCEL_PENDING initiator",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "final_offset": "0",
+        "matches_outstanding_preopen_stop": true
+      },
+      "expected": "cancellation_response_not_acceptance_evidence"
+    },
+    {
+      "name": "opening-cancel-matching-reject",
+      "state": "OPENING_CANCEL_PENDING initiator",
+      "frame": "STREAM_OPEN_REJECT",
+      "conditions": {
+        "error": "STREAM_STATE_ERROR",
+        "matches_cancelled_open": true
+      },
+      "expected": "cancelled_open_complete_no_session_error"
+    },
+    {
+      "name": "opening-cancel-acceptance-wins",
+      "state": "OPENING_CANCEL_PENDING initiator",
+      "frame": "STREAM_OPEN_OK",
+      "expected": "accepted_then_apply_pending_cancellation"
+    },
+    {
+      "name": "stream-credit-stale-reordered",
+      "state": "Stream sending",
+      "frame": "STREAM_CREDIT",
+      "conditions": {
+        "retained": "(512,1536)",
+        "received": "(0,1024)"
+      },
+      "expected": "ignore_stale"
+    },
+    {
+      "name": "stream-credit-crossed",
+      "state": "Stream sending",
+      "frame": "STREAM_CREDIT",
+      "conditions": {
+        "retained": "(512,1536)",
+        "received": "(768,1400)"
+      },
+      "expected": "session_error",
+      "error": "FLOW_CONTROL_ERROR"
+    },
+    {
+      "name": "transmission-retire-valid",
+      "state": "Session active",
+      "frame": "TRANSMISSION_RETIRE",
+      "conditions": {
+        "retired_through": "<= largest_contiguous_peer_tx_processed"
+      },
+      "expected": "advance_peer_retired_through_if_newer"
+    },
+    {
+      "name": "transmission-retire-future",
+      "state": "Session active",
+      "frame": "TRANSMISSION_RETIRE",
+      "conditions": {
+        "retired_through": "> largest_contiguous_peer_tx_processed"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "terminal-duplicate-before-retire",
+      "state": "TOMBSTONE",
+      "frame": "RESET_STREAM",
+      "conditions": {
+        "transmission_id": "> peer_retired_through",
+        "matches_recorded_terminal": true
+      },
+      "expected": "idempotent",
+      "response": "TRANSMISSION_ACK"
     }
   ]
 }

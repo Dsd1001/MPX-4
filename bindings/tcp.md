@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 08
+**Revision:** Draft 09
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -53,15 +53,18 @@ A replacement TCP connection for the same logical Carrier ID MUST perform a comp
 
 The Client opens a TCP connection to a Server endpoint selected by the deployment or application profile.
 
-Immediately after TCP connection establishment, the Client sends the MPX Connection Preface followed by CLIENT_INIT.
+Immediately after TCP connection establishment, the Client sends the MPX Connection Preface followed by CLIENT_INIT. The Client MAY place both in one TCP write; TCP segmentation or coalescing does not alter handshake semantics.
 
 No octets precede the MPX Connection Preface on a TCP Carrier defined by this binding.
 
-The Server reads and validates:
+The Server first parses the Connection Preface independently. If the Protocol Version is unsupported, it MAY send VERSION_NEGOTIATION immediately and MUST NOT parse any already-buffered following bytes as CLIENT_INIT under that unsupported version.
 
-1. Connection Preface;
-2. CLIENT_INIT;
-3. subsequent handshake messages.
+For a supported Protocol Version, the Server then reads and validates:
+
+1. CLIENT_INIT;
+2. subsequent handshake messages.
+
+A Client that already transmitted pipelined CLIENT_INIT may still accept VERSION_NEGOTIATION until it has accepted SERVER_INIT or a later handshake message. Any retry occurs on a fresh TCP connection.
 
 The Server MUST NOT treat a TCP connection as an authenticated Carrier until the MPX Finished exchange succeeds.
 
@@ -69,7 +72,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 08 does not define or reserve a well-known TCP port.
+MPX/4 Draft 09 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -228,7 +231,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 08.
+The exact deadline is local policy and is not negotiated by Draft 09.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -405,7 +408,7 @@ Different Carriers MAY connect to different server addresses when those endpoint
 
 ## 28. Maximum sizes and TCP
 
-MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values.
+MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values. MAX_RECORD_SIZE is Session-scoped in Draft 09; every JOIN repeats the CREATE-time directional value, so any eligible Carrier in the Session can carry an already-created Frame that satisfied the Session limits.
 
 An MPX Secure Record larger than one TCP segment is valid.
 

@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 08
+**Revision:** Draft 09
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -150,7 +150,9 @@ Selecting the Error Code and selecting failure scope are separate operations.
 For example:
 
 - malformed Frame encoding is FRAME_ENCODING_ERROR and Carrier-scoped;
-- a correctly encoded Frame that contradicts an established final size is FINAL_SIZE_ERROR and Session-scoped.
+- a correctly encoded Frame that contradicts an established final size is FINAL_SIZE_ERROR and Session-scoped;
+- structurally valid credit that is fully stale due to cross-Carrier reordering is ignored, while a crossed credit pair in which one monotonic component rises and the other falls is FLOW_CONTROL_ERROR;
+- TRANSMISSION_RETIRE beyond the largest contiguous peer Transmission prefix already processed is TRANSMISSION_ID_ERROR.
 
 An implementation MUST NOT widen or narrow failure scope merely because a different Error Code would be operationally more convenient.
 

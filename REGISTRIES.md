@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 08
+**Registry Revision:** Draft 09
 
 This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
@@ -87,7 +87,8 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x17 | RESET_STREAM | Stream | Core |
 | 0x18 | STOP_SENDING | Stream | Core |
 | 0x19 | STREAM_CONSUMED | Stream | Core |
-| 0x1a–0x1f | — | — | Core-reserved |
+| 0x1a | TRANSMISSION_RETIRE | Session / Transmission namespace | Core |
+| 0x1b–0x1f | — | — | Core-reserved |
 | 0x20 | SESSION_CREDIT | Session | Core |
 | 0x21 | CREDIT_PROBE | Stream / Session | Core |
 | 0x22–0x3f | — | — | Core-reserved |
@@ -130,7 +131,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 08 |
+| 1–7 | RESERVED | MUST be zero in Draft 09 |
 
 ## 7. Registry stability
 

@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 08",
+  "revision": "Draft 09",
   "representation": "decrypted Frame bytes before Secure Record encryption",
   "vectors": [
     {
@@ -54,6 +54,15 @@
         "stream_id": "0"
       },
       "hex": "210100",
+      "length": 3
+    },
+    {
+      "name": "transmission-retire",
+      "frame_type": "TRANSMISSION_RETIRE",
+      "fields": {
+        "retired_through": "7"
+      },
+      "hex": "1a0107",
       "length": 3
     }
   ]

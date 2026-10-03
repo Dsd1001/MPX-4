@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "core_revision": "Draft 08",
+  "core_revision": "Draft 09",
   "extension": "Carrier Receive Capacity Hint",
   "extension_revision": "01",
   "parameter_type": "0x40",

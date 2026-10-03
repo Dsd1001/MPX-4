@@ -1,7 +1,7 @@
 # MPX/4 Versioning and Compatibility
 
 **Document:** MPX/4 Versioning and Compatibility
-**Revision:** Draft 08
+**Revision:** Draft 09
 **Protocol Version:** 4
 **Status:** Normative Working Draft
 
@@ -35,9 +35,11 @@ A Session Protocol Version is never renegotiated by JOIN, Carrier replacement, l
 
 VERSION_NEGOTIATION is connection-scoped and unauthenticated.
 
-It may be sent only after a valid MPX magic value and before CLIENT_INIT for that candidate Carrier.
+A Server may send VERSION_NEGOTIATION immediately after parsing a valid MPX magic value plus an unsupported Protocol Version. The Server does not wait for CLIENT_INIT and MUST NOT parse already-pipelined bytes as CLIENT_INIT under that unsupported version.
 
-A Client receiving VERSION_NEGOTIATION:
+A Client may accept VERSION_NEGOTIATION even if it already transmitted a pipelined CLIENT_INIT, provided it has not yet accepted SERVER_INIT or any later handshake message on that candidate. Once SERVER_INIT has been accepted, VERSION_NEGOTIATION is no longer valid for that candidate.
+
+A Client receiving a valid VERSION_NEGOTIATION in that window:
 
 - MUST treat the message only as a list of versions the peer claims to support;
 - MUST NOT treat it as authenticated peer identity;

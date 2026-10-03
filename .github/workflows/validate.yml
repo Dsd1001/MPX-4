@@ -1,0 +1,22 @@
+name: Validate MPX4 Specification
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install validation dependency
+        run: python -m pip install 'cryptography>=42,<47'
+      - name: Verify generated TCP fixtures
+        run: python tools/generate_tcp_fixtures.py --check
+      - name: Validate specification and vectors
+        run: python tools/validate.py
+      - name: Ensure generated files are committed
+        run: git diff --exit-code

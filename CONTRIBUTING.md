@@ -101,3 +101,12 @@ When modifying normative text, identify whether the change is:
 - compatible extension;
 - incompatible draft change; or
 - security correction.
+
+## Validation
+
+Before submitting a protocol change, run:
+
+    python tools/generate_tcp_fixtures.py --check
+    python tools/validate.py
+
+Changes that alter canonical handshake or Secure Record fixtures MUST regenerate dependent TCP binding fixtures with `python tools/generate_tcp_fixtures.py`. JSON protocol integers above the JavaScript safe-integer range MUST be encoded as decimal strings.

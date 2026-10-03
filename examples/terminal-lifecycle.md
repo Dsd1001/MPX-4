@@ -1,6 +1,6 @@
 # MPX/4 Terminal Stream Lifecycle Example
 
-This non-normative example illustrates Draft 08 terminal state, late Frame handling, tombstones, and retired identities.
+This non-normative example illustrates Draft 09 terminal state, late Frame handling, tombstones, and retired identities.
 
 ## 1. Normal FIN with reordered DATA
 

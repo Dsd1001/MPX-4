@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 08
+**Revision:** Draft 09
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 08 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 08 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 09 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 09 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -124,7 +124,9 @@ CREATE without MAX_CARRIERS in CLIENT_INIT or SERVER_INIT is rejected.
 
 ### B11. JOIN consistency
 
-On JOIN, both endpoints repeat their original CREATE-time MAX_CARRIERS values. Changing either advertisement produces SESSION_CONFLICT and leaves the established Session unchanged.
+On JOIN, both endpoints repeat their original CREATE-time MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, MAX_STREAMS, and MAX_CARRIERS values. Changing any Session-scoped receive limit or MAX_CARRIERS advertisement produces SESSION_CONFLICT and leaves the established Session unchanged.
+
+This includes MAX_RECORD_SIZE: a later Carrier cannot join with a smaller or larger directional record limit than the value established for that endpoint during CREATE.
 
 ### B12. Session Protocol Version
 
@@ -132,9 +134,11 @@ Both implementations reproduce the relevant cases in test-vectors/version-compat
 
 A Session created under Protocol Version 4 accepts only JOIN and replacement Carriers using Protocol Version 4. A candidate using another locally supported Protocol Version is rejected with SESSION_CONFLICT and the Session remains unchanged.
 
-### B13. VERSION_NEGOTIATION downgrade safety
+### B13. VERSION_NEGOTIATION pipeline and downgrade safety
 
-VERSION_NEGOTIATION is accepted only before CLIENT_INIT. A retry uses a fresh underlying connection and does not enable a locally disabled or below-minimum Protocol Version. Authentication failure is not interpreted as permission to retry with a lower version.
+The Client sends Preface and CLIENT_INIT in one TCP write. The Server consumes only the Preface, determines that the requested version is unsupported, sends VERSION_NEGOTIATION, ignores the pipelined CLIENT_INIT bytes under that version, and closes. The Client accepts this unauthenticated response because it has not accepted SERVER_INIT, then retries only on a fresh underlying connection.
+
+A retry does not enable a locally disabled or below-minimum Protocol Version. Authentication failure is not interpreted as permission to retry with a lower version. VERSION_NEGOTIATION received after SERVER_INIT has been accepted is rejected for that candidate.
 
 ### B14. HANDSHAKE_REJECT encoding and scope
 
@@ -144,7 +148,7 @@ Receipt of HANDSHAKE_REJECT does not authenticate the sender, modify an existing
 
 ### B15. HANDSHAKE_REJECT is outside successful transcript
 
-A successful Draft 08 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record vector bytes as Draft 07. HANDSHAKE_REJECT appears only on a failed candidate and is never included in H0, H1, or H2 of a successful handshake.
+A successful Draft 09 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record baseline bytes as Draft 08. HANDSHAKE_REJECT and TRANSMISSION_RETIRE do not alter the successful handshake transcript.
 
 ### B16. CREATE Session-ID collision
 
@@ -260,6 +264,12 @@ The Session fails with TRANSMISSION_ID_ERROR.
 
 Transmission ID 2^62 - 1 can be allocated once as the final reliable Transmission ID. A subsequent need for a new reliable Transmission does not wrap or reuse an ID; the endpoint transitions the Session to CLOSING and sends SESSION_CLOSE(RESOURCE_LIMIT) when possible. Existing outstanding Transmissions may still be settled before shutdown.
 
+### E7. Transmission retirement watermark
+
+A sends reliable Transmissions 1 through 3. B processes all three, but the confirmation for Transmission 2 is initially lost. B retains enough response state to confirm Transmission 2 again. After A receives the repeated confirmation, A's Settled Through advances to 3 and A sends TRANSMISSION_RETIRE(3). Only then may B discard confirmation-replay detail for peer Transmissions through 3.
+
+A stale lower TRANSMISSION_RETIRE is ignored. A value beyond B's largest contiguous processed peer Transmission ID is TRANSMISSION_ID_ERROR.
+
 ## 9. Group F — Flow control
 
 **Mandatory.**
@@ -280,11 +290,15 @@ Aggregate committed bytes across Streams do not exceed Maximum Bytes.
 
 Reinjecting already committed bytes consumes no additional Stream or Session credit.
 
-### F5. Credit monotonicity
+### F5. Stale credit after cross-Carrier reordering
 
-A decreasing STREAM_CREDIT or SESSION_CREDIT is rejected.
+For both STREAM_CREDIT and SESSION_CREDIT, a newer advertisement is delivered first on one Carrier and a fully older component-wise advertisement arrives later on another Carrier. The older advertisement is ignored and the Session remains usable.
 
-### F6. CREDIT_PROBE
+### F6. Crossed credit is invalid
+
+A structurally valid credit pair in which one monotonic component is greater than retained state while the other is lower is rejected with FLOW_CONTROL_ERROR.
+
+### F7. CREDIT_PROBE
 
 A Stream-scoped CREDIT_PROBE produces current Stream and Session credit advertisement when state remains available.
 
@@ -336,11 +350,15 @@ RESET_STREAM with Final Offset 0 arrives before STREAM_OPEN.
 
 The Server records cancellation, acknowledges RESET_STREAM, and rejects the later STREAM_OPEN.
 
-### H4. Pre-open STOP_SENDING
+### H4. Pre-open STOP_SENDING cancellation response
 
-STOP_SENDING arrives before STREAM_OPEN.
+The Client enters OPENING_CANCEL_PENDING and sends STOP_SENDING while STREAM_OPEN is still in flight. STOP_SENDING arrives first. The Server acknowledges it and sends RESET_STREAM with Final Offset 0. The Client classifies that RESET_STREAM as a cancellation response, not acceptance evidence.
 
-The Server acknowledges it, sends RESET_STREAM with Final Offset 0, and rejects the later STREAM_OPEN.
+The later STREAM_OPEN is rejected with STREAM_OPEN_REJECT(STREAM_STATE_ERROR), and the cancelling Client treats that matching rejection as normal cancellation completion rather than a Session error.
+
+### H5. Acceptance wins the cancellation race
+
+The Server accepts STREAM_OPEN before the pre-open cancellation reaches it, but STREAM_OPEN_OK is delayed on another Carrier. A RESET_STREAM generated in response to the later STOP_SENDING may arrive first. When STREAM_OPEN_OK or another unambiguous acceptance-evidence Frame arrives, acceptance is authoritative and the Stream proceeds directly into the requested terminal/cancellation semantics. The Server does not later send STREAM_OPEN_REJECT for the already accepted Stream.
 
 ## 12. Group I — Tombstones and retired identities
 
@@ -366,6 +384,12 @@ Attempting to open an already used Stream ID never creates a new Stream.
 
 Tombstones and retired identities do not count as active Streams for MAX_STREAMS.
 
+### I6. Terminal confirmation loss blocks compaction
+
+A peer terminal reliable Frame is processed and its confirmation is lost while another Carrier remains active. The receiving endpoint does not compact away the ability to repeat that confirmation merely because its own local terminal Transmission is settled. A duplicate/reinjected peer terminal Frame is confirmed again.
+
+After the originator settles that Transmission and advances TRANSMISSION_RETIRE beyond it, the receiver may compact the confirmation-replay detail.
+
 ## 13. Group J — Carrier loss and replacement
 
 **Mandatory.**
@@ -378,7 +402,7 @@ The Session and active Streams remain usable over the other Carrier.
 
 ### J2. Outstanding Transmission
 
-A reliable Transmission attempted on the failed Carrier remains unsettled and can be retransmitted or reinjected.
+A reliable Transmission attempted on the failed Carrier remains unsettled and can be retransmitted or reinjected. Because MAX_RECORD_SIZE is Session-scoped, every established Carrier is capable of carrying a Frame that conformed to the Session record limit when the Transmission was created.
 
 ### J3. Replacement Generation
 
@@ -530,7 +554,7 @@ A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
     Protocol Version: 4
-    Revision: Draft 08
+    Revision: Draft 09
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -552,10 +576,10 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 08 keeps development Protocol Version 4 and preserves the successful Draft 07 Core handshake transcript, key schedule, Secure Record syntax, Frame encodings, and existing successful-path vectors.
+Draft 09 keeps development Protocol Version 4 and preserves the Draft 08 successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and existing baseline encrypted records.
 
-Draft 08 adds Core Handshake Message Type 0x06 HANDSHAKE_REJECT for pre-establishment candidate rejection. The message is used only on failed candidate handshakes and is never included in a successful Finished transcript. A Draft 07 endpoint does not understand Message Type 0x06, so failed-candidate diagnostics are not interoperable across Draft 07/08 even though the successful Draft 08 baseline handshake bytes are unchanged.
+Draft 09 adds Core Frame Type 0x1a TRANSMISSION_RETIRE. A Draft 08 peer treats this unknown Core Frame as PROTOCOL_VIOLATION, so established-session interoperability with Draft 08 is not guaranteed once a Draft 09 endpoint sends the retirement watermark. This is an explicitly documented development-line incompatibility before Version 4 stability.
 
-Draft 08 also closes identifier-lifecycle semantics without changing identifier encodings: Transmission IDs and Stream IDs never wrap, and retained Session IDs cannot be reused by CREATE. Conflicting Transmission-ID reuse is consistently TRANSMISSION_ID_ERROR.
+Draft 09 also changes peer-visible Core semantics without changing existing encodings: credit advertisements merge under cross-Carrier reordering, pre-open cancellation is distinguished from acceptance evidence, MAX_RECORD_SIZE becomes Session-scoped, and VERSION_NEGOTIATION explicitly supports Preface+CLIENT_INIT pipelining.
 
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 08 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 09 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

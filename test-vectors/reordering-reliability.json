@@ -1,0 +1,119 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 09",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "stream-credit-stale-reordering",
+      "sent_order": [
+        {
+          "consumed": "0",
+          "maximum": "1024"
+        },
+        {
+          "consumed": "512",
+          "maximum": "1536"
+        }
+      ],
+      "receive_order": [
+        {
+          "consumed": "512",
+          "maximum": "1536"
+        },
+        {
+          "consumed": "0",
+          "maximum": "1024"
+        }
+      ],
+      "expected": "second_received_pair_is_stale_ignore"
+    },
+    {
+      "name": "session-credit-stale-reordering",
+      "sent_order": [
+        {
+          "consumed": "0",
+          "maximum": "1048576"
+        },
+        {
+          "consumed": "524288",
+          "maximum": "1572864"
+        }
+      ],
+      "receive_order": [
+        {
+          "consumed": "524288",
+          "maximum": "1572864"
+        },
+        {
+          "consumed": "0",
+          "maximum": "1048576"
+        }
+      ],
+      "expected": "second_received_pair_is_stale_ignore"
+    },
+    {
+      "name": "crossed-credit-error",
+      "retained": {
+        "consumed": "512",
+        "maximum": "1536"
+      },
+      "received": {
+        "consumed": "768",
+        "maximum": "1400"
+      },
+      "expected": "FLOW_CONTROL_ERROR"
+    },
+    {
+      "name": "preopen-stop-reset-before-reject",
+      "client_state": "OPENING_CANCEL_PENDING",
+      "events": [
+        "client_send_STREAM_OPEN",
+        "client_send_STOP_SENDING",
+        "server_receive_STOP_before_OPEN",
+        "server_send_RESET_STREAM_0",
+        "client_receive_RESET_before_OPEN_result",
+        "server_receive_STREAM_OPEN",
+        "server_send_STREAM_OPEN_REJECT_STREAM_STATE_ERROR",
+        "client_receive_reject"
+      ],
+      "expected": [
+        "RESET_is_cancellation_response_not_acceptance",
+        "matching_REJECT_completes_cancellation",
+        "no_session_error"
+      ]
+    },
+    {
+      "name": "terminal-ack-loss-before-retire",
+      "events": [
+        "A_send_RESET_tx7",
+        "B_process_RESET",
+        "B_send_ACK_tx7_lost",
+        "A_reinject_RESET_tx7",
+        "B_repeat_ACK_tx7",
+        "A_settle_tx7",
+        "A_send_TRANSMISSION_RETIRE_7",
+        "B_receive_retire_7"
+      ],
+      "expected": [
+        "B_retains_confirmation_replay_until_retire",
+        "duplicate_RESET_confirmed_again",
+        "B_may_compact_after_retire"
+      ]
+    },
+    {
+      "name": "max-record-size-join-mismatch",
+      "create_receive_max_record_size": "65536",
+      "join_same_endpoint_max_record_size": "1024",
+      "expected": "SESSION_CONFLICT_candidate_rejected"
+    },
+    {
+      "name": "max-record-size-reinjection",
+      "session_receive_max_record_size": "65536",
+      "frame_plaintext_length": "32776",
+      "carrier_a": "established",
+      "carrier_b": "established_same_session_limit",
+      "carrier_a_event": "lost",
+      "expected": "same_frame_may_reinject_on_carrier_b"
+    }
+  ]
+}

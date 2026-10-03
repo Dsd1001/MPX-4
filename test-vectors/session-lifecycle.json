@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 08",
+  "revision": "Draft 09",
   "document": "STATE-MACHINES.md",
   "cases": [
     {
@@ -113,7 +113,10 @@
       "name": "session-close-is-not-dormant",
       "before": "ACTIVE",
       "event": "SESSION_CLOSE",
-      "expected_path": ["CLOSING", "CLOSED"]
+      "expected_path": [
+        "CLOSING",
+        "CLOSED"
+      ]
     }
   ]
 }

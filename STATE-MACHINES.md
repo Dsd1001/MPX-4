@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 08
+**Revision:** Draft 09
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -89,7 +89,7 @@ While DORMANT:
 
 When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
 
-DORMANT retention duration is local policy. Draft 08 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+DORMANT retention duration is local policy. Draft 09 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
 
 The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
 
@@ -229,6 +229,7 @@ Replacement MUST preserve Session identity and all Session-owned state, includin
 - Stream opening and terminal state;
 - Stream and Session flow-control accounting;
 - allocated, outstanding, settled, and retired Transmission IDs;
+- local Settled Through and peer Retired Through Transmission watermarks;
 - tombstones and retired Stream identities.
 
 The replacement Carrier has new handshake nonces, new traffic secrets, new traffic keys, new IVs, and new per-direction Record Sequence Number spaces beginning at zero.
@@ -342,32 +343,30 @@ After a Server accepts a Stream, STREAM_OPEN_OK, STREAM_CREDIT, STREAM_DATA, STR
 
 Therefore the Client can observe a Frame that could only have been sent after acceptance before it observes STREAM_OPEN_OK.
 
-While in OPENING, the Client MUST tolerate the following inbound Frames as **acceptance evidence**:
+While in ordinary OPENING, the Client MUST tolerate the following inbound Frames as **acceptance evidence**:
 
 - STREAM_CREDIT;
 - STREAM_FIN with Final Offset 0;
-- RESET_STREAM with Final Offset 0;
+- RESET_STREAM with Final Offset 0, except when Section 7 classifies it as a response to local pre-open cancellation;
 - STOP_SENDING.
 
-Draft 08 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 09 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
-After acceptance evidence has been observed, a later STREAM_OPEN_REJECT for that Stream is a STREAM_STATE_ERROR.
+After acceptance evidence has been observed in ordinary OPENING, a later STREAM_OPEN_REJECT for that Stream is a STREAM_STATE_ERROR.
 
 An implementation MAY internally transition to an equivalent "OPENING_WITH_ACCEPTANCE_EVIDENCE" state.
 
 A rejected opening is terminal. Once STREAM_OPEN_REJECT is processed, the Stream ID MUST NOT be reused. Duplicate STREAM_OPEN_REJECT carrying the same Stream ID, original open Transmission ID, and Error Code is idempotent. A conflicting rejection is STREAM_STATE_ERROR. An implementation MAY represent the rejected Stream as a tombstone containing the original open Transmission ID, the rejection decision, and Error Code.
 
-The Server MUST NOT send any acceptance-evidence Frame before it has accepted the Stream.
+The Server MUST NOT send an acceptance-evidence Frame before it has accepted the Stream. The RESET_STREAM response explicitly permitted by Section 7.2 before STREAM_OPEN is a cancellation response and is not acceptance evidence.
 
 ## 7. Pre-open cancellation
 
-The reverse reordering case is also possible.
+A Client can locally cancel a Stream while its STREAM_OPEN is still in flight. The Client then enters a logical **OPENING_CANCEL_PENDING** state for that Stream ID. The implementation MAY use another internal name, but the externally visible behavior below is required.
 
-A Client can locally cancel a Stream while its STREAM_OPEN is still in flight. A RESET_STREAM or STOP_SENDING sent as part of that cancellation can arrive at the Server before STREAM_OPEN.
-
-The Server MUST support the following pre-open cancellation cases for a previously unseen Client Stream ID that is valid under the Stream-ID allocation rules:
+A RESET_STREAM or STOP_SENDING sent as part of that cancellation can arrive at the Server before STREAM_OPEN.
 
 ### 7.1. RESET_STREAM before STREAM_OPEN
 
@@ -379,7 +378,7 @@ The Server:
 2. acknowledges the RESET_STREAM;
 3. MUST NOT later create an application Stream if STREAM_OPEN for the same Stream ID arrives.
 
-A later STREAM_OPEN for that ID is answered with STREAM_OPEN_REJECT using STREAM_STATE_ERROR.
+A later STREAM_OPEN for that ID is answered with STREAM_OPEN_REJECT using STREAM_STATE_ERROR. For a Client in OPENING_CANCEL_PENDING, that matching rejection completes the cancelled opening and is not a Session error.
 
 A pre-open RESET_STREAM with non-zero Final Offset is a STREAM_STATE_ERROR because application data could not legally have been committed before Stream acceptance.
 
@@ -387,9 +386,13 @@ A pre-open RESET_STREAM with non-zero Final Offset is a STREAM_STATE_ERROR becau
 
 STOP_SENDING MAY arrive before STREAM_OPEN.
 
-The Server records the receive-direction cancellation for that Stream ID, acknowledges the STOP_SENDING, and sends RESET_STREAM with Final Offset 0 for its not-yet-started sending direction unless an equivalent RESET_STREAM is already pending.
+The Server records the receive-direction cancellation for that Stream ID, acknowledges the STOP_SENDING, and sends RESET_STREAM with Final Offset 0 for its not-yet-started sending direction unless an equivalent RESET_STREAM is already pending. This RESET_STREAM is a **pre-open cancellation response**; it is explicitly permitted before Stream acceptance and does not prove that the Stream was accepted.
 
-If STREAM_OPEN later arrives, the Stream MUST NOT become an application Stream. The Server MUST answer with STREAM_OPEN_REJECT using STREAM_STATE_ERROR.
+A Client in OPENING_CANCEL_PENDING that has an outstanding pre-open STOP_SENDING treats a matching RESET_STREAM with Final Offset 0 as cancellation response rather than acceptance evidence.
+
+If STREAM_OPEN later arrives at the Server without having been accepted earlier, the Stream MUST NOT become an application Stream. The Server MUST answer with STREAM_OPEN_REJECT using STREAM_STATE_ERROR. The cancelling Client treats this matching rejection as normal cancellation completion.
+
+If the Server had already accepted STREAM_OPEN before processing the cancellation, STREAM_OPEN_OK or another unambiguous acceptance-evidence Frame remains authoritative when it arrives. The Stream is then treated as accepted and immediately subject to the already requested cancellation/terminal semantics; a later STREAM_OPEN_REJECT is not permitted for that accepted Stream.
 
 ### 7.3. Other Frames before STREAM_OPEN
 
@@ -517,6 +520,17 @@ Transmission ID 2^62 - 1 is the final allocatable reliable Transmission ID in a 
 
 After that ID is allocated, the endpoint may still settle, retransmit, reinject, or receive acknowledgements for existing Transmissions. It MUST NOT create a new reliable Transmission. If protocol or application progress requires a new reliable Transmission, the endpoint transitions the Session to CLOSING and SHOULD send SESSION_CLOSE with RESOURCE_LIMIT when an authenticated writable Carrier exists.
 
+### 12.2. Transmission retirement watermarks
+
+Each endpoint tracks:
+
+- local Settled Through: the largest contiguous prefix of its own reliable Transmission IDs that are settled;
+- peer Retired Through: the largest valid TRANSMISSION_RETIRE value received from the peer.
+
+Local Settled Through advances only when every locally allocated Transmission ID up to the new value is settled. An advance above the last advertised value creates a pending Session-state advertisement that MUST eventually be emitted as TRANSMISSION_RETIRE while an authenticated writable Carrier exists. Peer Retired Through is monotonic and stale/lower advertisements are ignored. A peer retirement value that exceeds the largest contiguous peer Transmission ID already processed is TRANSMISSION_ID_ERROR.
+
+For a peer reliable Transmission ID greater than peer Retired Through, enough response state MUST remain to reproduce the required confirmation on a duplicate Attempt. For an ID less than or equal to peer Retired Through, a later duplicate has no protocol or application effect and need not be confirmed again.
+
 ## 13. STREAM_CREDIT validity after terminal state
 
 STREAM_CREDIT can legitimately arrive after a sending direction has become terminal because it may have been emitted earlier on another Carrier.
@@ -579,7 +593,8 @@ For an accepted Stream, the Stream can leave active Stream state and enter TOMBS
 2. its receive direction has an established terminal state;
 3. receive-side accounting has been fully released through the peer Final Offset;
 4. for a normally FIN-terminated receive direction, the reliable STREAM_CONSUMED exchange has completed;
-5. no locally pending reliable Transmission still requires full Stream state.
+5. no locally pending reliable Transmission still requires full Stream state;
+6. every peer-originated reliable Transmission whose duplicate would require a Stream-specific confirmation is covered by peer Retired Through, or equivalent confirmation-replay state remains retained outside the Stream tombstone.
 
 RESET_STREAM acknowledgement itself can settle sender-side data credit associated with the reset final size; an additional STREAM_CONSUMED is not required for the reset receive direction.
 
@@ -597,7 +612,7 @@ While a tombstone is retained:
 
 ## 18. Retired Stream identities
 
-After all conditions in Section 16 are satisfied and the implementation no longer needs detailed tombstone information, it MAY compact a tombstone into a **retired identity**.
+After all conditions in Section 16 are satisfied, and every peer reliable Transmission that would require a Stream-specific confirmation has either been covered by peer Retired Through or has equivalent confirmation-replay state retained elsewhere, the implementation MAY compact a tombstone into a **retired identity**.
 
 A retired identity records at least that the Stream ID has been used and MUST NOT be reused.
 
@@ -608,13 +623,13 @@ Frames received for a retired identity:
 - MUST NOT recreate an application Stream;
 - MUST NOT increase Stream or Session credit commitment;
 - MUST NOT deliver application data;
-- MAY be silently ignored when the detailed state required for a safe response has been compacted.
+- MAY be silently ignored only when any reliable Transmission carried by that Frame is already covered by peer Retired Through; otherwise the endpoint MUST retain or recover enough confirmation-replay state to send the required confirmation again.
 
 The endpoint MUST retain enough information for the Session lifetime to prevent a retired Stream ID from becoming a new Stream again.
 
 ### 18.1. Stream-ID exhaustion
 
-For the Draft 08 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
+For the Draft 09 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
 
 After the Client allocates Stream ID 2^62 - 1, no additional Stream can be created in that Session. Existing Streams and Session state remain valid. A later local request to create a Stream is rejected locally unless the implementation chooses to close the Session with RESOURCE_LIMIT.
 
@@ -664,7 +679,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 08 implementation MUST:
+A conforming Draft 09 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;

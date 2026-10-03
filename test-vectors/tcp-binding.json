@@ -1,13 +1,17 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 08",
+  "revision": "Draft 09",
   "binding": "TCP",
-  "purpose": "Byte-stream framing and transport-loss conformance",
+  "purpose": "Byte-stream framing and transport-loss conformance generated from the canonical Draft 09 handshake and Secure Record fixtures",
+  "source_fixtures": {
+    "handshake": "key-schedule.json",
+    "secure_records": "secure-record.json"
+  },
   "fixtures": {
     "connection_preface_hex": "4d50580004",
-    "client_init_hex": "01405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101",
-    "secure_record_seq0_hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9",
-    "secure_record_seq1_hex": "000300b90cec9b2be63ff0594a681bfbea22502c19",
+    "client_init_hex": "01405a01001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f070004800080000800048001000009000248000a01024060",
+    "secure_record_seq0_hex": "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c",
+    "secure_record_seq1_hex": "00037754b00910d0193ae9a8cd76a7a8f6cd0eebc8",
     "secure_record_seq1_plaintext_hex": "010101",
     "secure_record_seq1_meaning": "PING token=1"
   },
@@ -31,7 +35,7 @@
     {
       "name": "preface-coalesced-with-client-init",
       "input_chunks_hex": [
-        "4d5058000401405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101"
+        "4d5058000401405a01001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f070004800080000800048001000009000248000a01024060"
       ],
       "expected_units": [
         {
@@ -41,7 +45,7 @@
         {
           "type": "handshake_message",
           "name": "CLIENT_INIT",
-          "hex": "01405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101"
+          "hex": "01405a01001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f070004800080000800048001000009000248000a01024060"
         }
       ]
     },
@@ -49,59 +53,59 @@
       "name": "secure-record-fragmented",
       "input_chunks_hex": [
         "00",
-        "0dd48ca4",
-        "d88424c813baa4",
-        "aeffbc7867966596e11781365723a7bbb248e9"
+        "0d406d7f",
+        "ae1794dd7ff584",
+        "8ed2ed85807a6e5c368cbe170c51118788869c"
       ],
       "expected_units": [
         {
           "type": "secure_record",
           "sequence_number": "0",
-          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+          "hex": "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c"
         }
       ]
     },
     {
       "name": "two-secure-records-coalesced",
       "input_chunks_hex": [
-        "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9000300b90cec9b2be63ff0594a681bfbea22502c19"
+        "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c00037754b00910d0193ae9a8cd76a7a8f6cd0eebc8"
       ],
       "expected_units": [
         {
           "type": "secure_record",
           "sequence_number": "0",
-          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+          "hex": "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c"
         },
         {
           "type": "secure_record",
           "sequence_number": "1",
-          "hex": "000300b90cec9b2be63ff0594a681bfbea22502c19"
+          "hex": "00037754b00910d0193ae9a8cd76a7a8f6cd0eebc8"
         }
       ]
     },
     {
       "name": "first-record-plus-partial-second",
       "input_chunks_hex": [
-        "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9000300b9",
-        "0cec9b2be63ff0594a681bfbea22502c19"
+        "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c00037754",
+        "b00910d0193ae9a8cd76a7a8f6cd0eebc8"
       ],
       "expected_units": [
         {
           "type": "secure_record",
           "sequence_number": "0",
-          "hex": "000dd48ca4d88424c813baa4aeffbc7867966596e11781365723a7bbb248e9"
+          "hex": "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c"
         },
         {
           "type": "secure_record",
           "sequence_number": "1",
-          "hex": "000300b90cec9b2be63ff0594a681bfbea22502c19"
+          "hex": "00037754b00910d0193ae9a8cd76a7a8f6cd0eebc8"
         }
       ]
     },
     {
       "name": "eof-mid-record",
       "input_chunks_hex": [
-        "000dd48ca4d88424"
+        "000d406d7fae1794"
       ],
       "transport_event": "EOF",
       "expected_units": [],

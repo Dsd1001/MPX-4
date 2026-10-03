@@ -4,6 +4,35 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
+## Draft 09 — 2026-10-04
+
+Draft 09 closes cross-Carrier reordering, cancellation, reliable-state retirement, record-size failover, version-negotiation pipelining, and executable conformance gaps identified during Draft 07 review and revalidated against Draft 08.
+
+### Core semantics
+
+- STREAM_CREDIT and SESSION_CREDIT are generated monotonically but received with a component-wise merge rule: fully stale advertisements are ignored, while crossed pairs are FLOW_CONTROL_ERROR.
+- Pre-open local cancellation has an explicit OPENING_CANCEL_PENDING semantic state. RESET_STREAM(0) emitted in response to pre-open STOP_SENDING is a cancellation response, not acceptance evidence; a matching later STREAM_OPEN_REJECT completes cancellation normally.
+- MAX_RECORD_SIZE is Session-scoped and must be repeated unchanged on JOIN, guaranteeing that any eligible Carrier can carry an already-created Frame that satisfied Session limits.
+- VERSION_NEGOTIATION now explicitly supports Preface+CLIENT_INIT pipelining: the Server may answer after parsing only the unsupported Preface, and the Client may accept VN after sending CLIENT_INIT until SERVER_INIT has been accepted.
+
+### Transmission retirement
+
+- Added Core Frame Type `0x1a` `TRANSMISSION_RETIRE` with one `Retired Through` VarInt.
+- Each sender tracks the largest contiguous prefix of settled local Transmission IDs.
+- A receiver retains enough confirmation-replay state for peer reliable Transmissions until the peer retirement watermark covers them.
+- This prevents tombstone/retired-state compaction from causing an outstanding reliable terminal Transmission to lose its ability to receive a repeated confirmation after an ACK loss.
+
+### Test and fixture corrections
+
+- TCP binding fixtures are generated from current `key-schedule.json` and `secure-record.json`; stale Draft 06 scheduler bytes and mismatched ciphertext are removed.
+- Protocol JSON integers above JavaScript's safe-integer range are represented as decimal strings.
+- Added `reordering-reliability.json` and expanded state/version/error vectors.
+- Added `tools/validate.py`, deterministic TCP fixture generation, and GitHub Actions validation.
+
+### Compatibility
+
+Draft 09 keeps development Protocol Version 4 and preserves the Draft 08 successful handshake transcript, key schedule, and baseline encrypted records. The new Core `TRANSMISSION_RETIRE` Frame is not understood by Draft 08 peers, so established-session interoperability is not guaranteed once it is sent. This incompatibility remains permitted before Version 4 stability.
+
 ## Draft 08 — 2026-10-04
 
 Draft 08 is a Core closure / freeze-preparation revision. It does not add application features; it closes pre-establishment failure signaling and identifier-lifecycle edge cases before a future Protocol Version 4 stability review.
