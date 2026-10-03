@@ -1,7 +1,7 @@
 # MPX/4 Versioning and Compatibility
 
 **Document:** MPX/4 Versioning and Compatibility
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4
 **Status:** Normative Working Draft
 
@@ -52,6 +52,8 @@ An authentication failure, Secure Record failure, HANDSHAKE_REJECT, or other pos
 
 HANDSHAKE_REJECT is a candidate-failure diagnostic within an already understood Protocol Version. It is not version negotiation and MUST NOT enable or select another Protocol Version.
 
+Draft 11 VERSION_NEGOTIATION does not authenticate the peer's advertised list or prove that the selected retry is the highest mutually supported version. It prevents fallback only below local enabled/minimum policy. A deployment that requires strict resistance to attacker-induced fallback among otherwise permitted versions MUST pin the acceptable version/minimum so that the lower version is not permitted for automatic retry, until an authenticated compatible-version mechanism is defined.
+
 ## 4. Stable-version compatibility rules
 
 After a Protocol Version is declared stable, the following changes require a new Protocol Version:
@@ -92,6 +94,8 @@ An extension MAY use:
 - a published extension Frame Type;
 - a published extension Error Code;
 - another explicitly defined negotiation mechanism.
+
+Allocation in the Handshake Message Type extension range does not by itself permit an extra message to be inserted into the Draft 11 successful handshake. An extension defining an additional Handshake Message MUST also define explicit support negotiation, exact placement/order, transcript-hash participation, state transitions, and behavior for a peer that does not implement the extension. Until those rules exist, Core endpoints do not generically skip unknown handshake messages.
 
 An extension MUST NOT assume that the peer implements it merely because both endpoints use the same Core Protocol Version.
 

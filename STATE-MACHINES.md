@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -89,9 +89,11 @@ While DORMANT:
 
 When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
 
-DORMANT retention duration is local policy. Draft 10 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+DORMANT retention duration is local policy. Draft 11 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
 
 The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
+
+After DORMANT-to-ACTIVE recovery, current Session credit and any required probed Stream credit are eventually refreshed according to SPECIFICATION.md. A non-zero TRANSMISSION_RETIRE watermark that can release peer replay state is likewise eventually refreshed while an authenticated writable Carrier exists.
 
 ### 3.4. CLOSING
 
@@ -190,14 +192,14 @@ Equal Generation is a conflict even when the previously accepted transport is al
 
 ### 4.5. Replacement commit
 
-When a candidate with G' > G is otherwise ready to reach ESTABLISHED, the endpoint first evaluates the Active Carrier Count rule in Section 4.8. If committing the candidate would exceed the Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT and the Generation advance does not occur.
+When a candidate with G' > G is otherwise ready to reach ESTABLISHED, the endpoint first evaluates the Active Carrier Count rule in Section 4.9. If committing the candidate would exceed the Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT and the Generation advance does not occur.
 
 Otherwise, the Generation advance is committed at that endpoint as one Session-state transition:
 
 1. Highest Accepted Generation becomes G';
 2. the new incarnation becomes CURRENT(G');
 3. every lower Generation of that Carrier ID becomes SUPERSEDED;
-4. the Active Carrier Count is updated according to Section 4.8;
+4. the Active Carrier Count is updated according to Section 4.9;
 5. no new Transmission Attempt may be scheduled on a superseded incarnation;
 6. no new path-measurement sample may be attributed to a superseded incarnation;
 7. subsequently received Secure Records from a superseded incarnation MUST NOT create new protocol state;
@@ -221,7 +223,13 @@ Therefore:
 
 An implementation MUST NOT select a winner solely from unauthenticated transport arrival order.
 
-### 4.7. Replacement invariants
+### 4.7. Ambiguous candidate outcome
+
+After sending CLIENT_FINISHED, the Client may lose the candidate transport before authenticating SERVER_FINISHED. The Client then treats establishment as ambiguous rather than as either accepted or rejected.
+
+An unauthenticated HANDSHAKE_REJECT or transport close does not resolve this ambiguity. Recovery follows SPECIFICATION.md Section 9.3. In particular, an already accepted Carrier replacement advances above every ambiguity-causing attempted Generation retained locally, whereas an ambiguous first use of an UNUSED Carrier ID recovers through another UNUSED Carrier ID at Generation 0 unless authenticated evidence establishes the earlier acceptance.
+
+### 4.8. Replacement invariants
 
 Replacement MUST preserve Session identity and all Session-owned state, including:
 
@@ -238,7 +246,7 @@ Outstanding reliable Transmissions remain eligible for normal retransmission or 
 
 Generation values never wrap. If the Highest Accepted Generation is 2^62 - 1, that Carrier ID has no further valid replacement Generation in the Session.
 
-### 4.8. Active logical Carrier count
+### 4.9. Active logical Carrier count
 
 Each endpoint maintains a local Active Carrier Count for the Session.
 
@@ -283,7 +291,7 @@ HANDSHAKING candidates do not count toward MAX_CARRIERS. Implementations MAY app
 
 Carrier ID magnitude is irrelevant to this state machine. For example, Carrier IDs 1 and 4000000000 represent two logical Carriers, not four billion Carriers.
 
-### 4.9. MAX_CARRIERS consistency on JOIN
+### 4.10. MAX_CARRIERS consistency on JOIN
 
 Every JOIN carries both endpoints' original Session-scoped MAX_CARRIERS advertisements through CLIENT_INIT and SERVER_INIT.
 
@@ -293,7 +301,7 @@ The Effective Carrier Limit is never renegotiated by JOIN or replacement.
 
 A JOIN accepted while the Session is DORMANT transitions the Session back to ACTIVE only when the candidate Carrier reaches ESTABLISHED. A failed candidate leaves the Session DORMANT.
 
-### 4.10. Session Protocol Version on JOIN
+### 4.11. Session Protocol Version on JOIN
 
 CREATE records the Protocol Version of the first established Carrier as the immutable Session Protocol Version.
 
@@ -350,7 +358,7 @@ While in ordinary OPENING, the Client MUST tolerate the following inbound Frames
 - RESET_STREAM with Final Offset 0, except when Section 7 classifies it as a response to local pre-open cancellation;
 - STOP_SENDING.
 
-Draft 10 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 11 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -422,7 +430,7 @@ After FIN_PENDING or RESET_PENDING begins, no new STREAM_DATA may be committed i
 
 Retransmitted copies of the same terminal Frame retain the same Transmission ID.
 
-If STOP_SENDING is received while FIN is pending, the sender MUST create a new RESET_STREAM Transmission with the same Final Offset and the STOP_SENDING Error Code. The RESET_STREAM supersedes the FIN only for application-visible termination. The original FIN remains an outstanding reliable Transmission until its required TRANSMISSION_ACK is received. The sender MUST continue retransmission or reinjection Attempts of that same FIN Transmission as needed while an eligible Carrier exists, retaining the original Transmission ID and Frame contents.
+If STOP_SENDING is received while FIN is pending, the sender MUST create a new RESET_STREAM Transmission with the same Final Offset and the STOP_SENDING Stream Error Code. The RESET_STREAM supersedes the FIN only for application-visible termination. The original FIN remains an outstanding reliable Transmission until its required TRANSMISSION_ACK is received. The sender MUST continue retransmission or reinjection Attempts of that same FIN Transmission as needed while an eligible Carrier exists, retaining the original Transmission ID and Frame contents.
 
 If the peer has already processed the RESET_STREAM, a later STREAM_FIN with the same Final Offset is acknowledged normally but MUST NOT replace reset semantics with graceful EOF. The FIN acknowledgement settles only the FIN Transmission and MUST NOT settle or cancel the RESET_STREAM Transmission.
 
@@ -497,7 +505,7 @@ The following Frames describe peer state for the local sending direction:
 | Received Frame | SEND_ACTIVE | FIN_PENDING | RESET_PENDING | SEND_CLOSED |
 |---|---:|---:|---:|---:|
 | STREAM_CREDIT | A | A if values do not contradict final size | A if values do not contradict final size | validate then ignore |
-| STOP_SENDING | A; send RESET_STREAM using the STOP_SENDING Error Code | A; send RESET_STREAM with the same Final Offset and make reset semantics authoritative | D; repeat pending RESET_STREAM as needed | D |
+| STOP_SENDING | A; send RESET_STREAM using the STOP_SENDING Stream Error Code | A; send RESET_STREAM with the same Final Offset and make reset semantics authoritative | D; repeat pending RESET_STREAM as needed | D |
 | STREAM_CONSUMED | E before a final size is established | A only if Final Offset equals local final size | A only if Final Offset equals local final size | D if Final Offset matches |
 | TRANSMISSION_ACK | settle referenced pending Tx | settle referenced pending Tx | settle referenced pending Tx | ignore duplicate settled ACK |
 
@@ -578,11 +586,11 @@ A tombstone SHOULD retain, when applicable:
 - local terminal kind;
 - local terminal Transmission ID;
 - local Final Offset;
-- local terminal Error Code for RESET_STREAM;
+- local terminal Stream Error Code for RESET_STREAM;
 - peer terminal kind;
 - peer terminal Transmission ID;
 - peer Final Offset;
-- peer terminal Error Code for RESET_STREAM;
+- peer terminal Stream Error Code for RESET_STREAM;
 - last receive-side Consumed Offset;
 - last receive-side Maximum Offset.
 
@@ -634,7 +642,7 @@ The endpoint MUST retain enough information for the Session lifetime to prevent 
 
 ### 18.1. Stream-ID exhaustion
 
-For the Draft 10 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
+For the Draft 11 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
 
 After the Client allocates Stream ID 2^62 - 1, no additional Stream can be created in that Session. Existing Streams and Session state remain valid. A later local request to create a Stream is rejected locally unless the implementation chooses to close the Session with RESOURCE_LIMIT.
 
@@ -684,7 +692,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 10 implementation MUST:
+A conforming Draft 11 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;

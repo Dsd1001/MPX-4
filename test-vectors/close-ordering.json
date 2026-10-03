@@ -1,0 +1,53 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 11",
+  "document": "SPECIFICATION.md / ERROR-HANDLING.md",
+  "cases": [
+    {
+      "name": "carrier-close-last",
+      "frames": [
+        "PING",
+        "CARRIER_CLOSE"
+      ],
+      "expected": "valid_terminal_record"
+    },
+    {
+      "name": "carrier-close-trailing-frame",
+      "frames": [
+        "CARRIER_CLOSE",
+        "PING"
+      ],
+      "expected": "trailing_frame_must_not_create_state"
+    },
+    {
+      "name": "session-close-last",
+      "frames": [
+        "STREAM_CREDIT",
+        "SESSION_CLOSE"
+      ],
+      "expected": "valid_terminal_record"
+    },
+    {
+      "name": "session-close-trailing-frame",
+      "frames": [
+        "SESSION_CLOSE",
+        "STREAM_OPEN"
+      ],
+      "expected": "trailing_frame_must_not_create_state"
+    },
+    {
+      "name": "unknown-extension-reason-carrier",
+      "frame": "CARRIER_CLOSE",
+      "error_code": "0x40",
+      "range": "negotiated_extension",
+      "expected": "close_carrier_reason_unknown"
+    },
+    {
+      "name": "unknown-extension-reason-session",
+      "frame": "SESSION_CLOSE",
+      "error_code": "0x40",
+      "range": "negotiated_extension",
+      "expected": "close_session_reason_unknown"
+    }
+  ]
+}

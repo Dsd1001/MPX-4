@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 10 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 10 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 11 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 11 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -148,11 +148,17 @@ Receipt of HANDSHAKE_REJECT does not authenticate the sender, modify an existing
 
 ### B15. HANDSHAKE_REJECT is outside successful transcript
 
-A successful Draft 10 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record baseline bytes as Draft 09. Draft 10 changes established-state reliability semantics but does not alter the successful handshake transcript.
+A successful Draft 11 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record baseline bytes as Draft 10. Draft 11 changes established-state reliability semantics but does not alter the successful handshake transcript.
 
 ### B16. CREATE Session-ID collision
 
 A CREATE using a SESSION_ID already mapped to CREATING, ACTIVE, DORMANT, or CLOSING state, or to retained CLOSED retirement state, is rejected with SESSION_CONFLICT. The existing or retired Session is not overwritten, merged, reopened, or treated as the target of a JOIN.
+
+### B17. Ambiguous establishment recovery
+
+The harness drops the candidate transport after the Client sends CLIENT_FINISHED but before it authenticates SERVER_FINISHED. Tests cover an existing logical-Carrier replacement and an ambiguous CREATE/first-use Carrier ID.
+
+The Client does not treat transport loss or an unauthenticated HANDSHAKE_REJECT as proof of Server commit/non-commit. A known replacement retries above every locally accepted or ambiguity-causing attempted Generation. An ambiguous first-use Carrier ID recovers through a different unused ID at Generation 0 unless authenticated evidence proves the first incarnation was accepted. An authenticated JOIN can establish retained Session existence; an unauthenticated SESSION_NOT_FOUND cannot.
 
 ## 6. Group C — Single-Carrier Stream
 
@@ -280,6 +286,10 @@ Transmission 1 is settled. STREAM_FIN Transmission 2 is attempted on Carrier A, 
 
 After the peer processes and confirms RESET_STREAM 3, the sender reinjects FIN 2. The peer, already in reset semantics, acknowledges the late FIN with the same Final Offset without restoring graceful EOF. Once FIN 2 is confirmed, the sender's Settled Through advances from 1 to 3 and TRANSMISSION_RETIRE(3) is valid.
 
+### E10. Allocated reliable Transmission cannot disappear
+
+The harness distinguishes tentative local reservation from protocol allocation. After a reliable Transmission ID is formally allocated, local application cancellation or queue reshaping does not silently remove it from Session reliability state. While the Session remains usable and an eligible Carrier exists, the Transmission eventually receives an Attempt and can be settled by its required confirmation; an unrecoverable local resource failure closes the Session with RESOURCE_LIMIT when possible.
+
 ## 9. Group F — Flow control
 
 **Mandatory.**
@@ -311,6 +321,10 @@ A structurally valid credit pair in which one monotonic component is greater tha
 ### F7. CREDIT_PROBE
 
 A Stream-scoped CREDIT_PROBE produces current Stream and Session credit advertisement when state remains available.
+
+### F8. Terminal Final Offset obeys credit
+
+STREAM_FIN and RESET_STREAM are tested at and beyond the current Stream Maximum Offset and aggregate Session Maximum Bytes. A terminal Final Offset that increases commitment within both limits is accepted. Exceeding either credit limit fails with FLOW_CONTROL_ERROR. Contradicting an already-established final size still fails with FINAL_SIZE_ERROR.
 
 ## 10. Group G — Stream terminal behavior
 
@@ -468,6 +482,10 @@ A valid JOIN or higher-Generation replacement reaches ESTABLISHED for a DORMANT 
 
 An endpoint discards a DORMANT Session according to local retention policy. A later JOIN for that Session is rejected as SESSION_NOT_FOUND. No negotiated minimum DORMANT retention time is assumed.
 
+### J16. Recovery refresh progress
+
+After DORMANT-to-ACTIVE recovery or Carrier replacement, current SESSION_CREDIT is eventually refreshed while an authenticated writable Carrier exists. A valid Stream-scoped CREDIT_PROBE for retained state eventually produces current STREAM_CREDIT plus SESSION_CREDIT. A non-zero TRANSMISSION_RETIRE watermark that can release peer replay state is eventually refreshed. Coalescing and rate limiting are permitted.
+
 ## 14. Group K — Close behavior
 
 **Mandatory.**
@@ -492,6 +510,10 @@ A repeated SESSION_CLOSE is idempotent.
 
 TCP half-close is not interpreted as STREAM_FIN, RESET_STREAM, CARRIER_CLOSE, or SESSION_CLOSE.
 
+### K6. Close is terminal within its Secure Record
+
+CARRIER_CLOSE and SESSION_CLOSE are emitted as the final Frame of their containing Secure Record. If a negative-test peer places an authenticated Frame after a close Frame, the trailing Frame does not create protocol or application state. A syntactically valid unknown reason from a negotiated extension/private range does not cancel the terminal close action.
+
 ## 15. Group L — Negative protocol tests
 
 **Mandatory.**
@@ -504,9 +526,13 @@ At minimum, the receiver is tested with:
 - invalid Stream-ID parity;
 - DATA exceeding Stream credit;
 - DATA exceeding Session credit;
+- FIN or RESET_STREAM Final Offset exceeding retained Stream or Session credit;
+- structurally invalid credit (Consumed greater than Maximum), including when the pair would otherwise look stale;
 - conflicting overlapping DATA bytes;
 - contradictory Final Offset;
 - conflicting Transmission-ID reuse;
+- non-zero Secure Record Flags, including a cryptographically self-consistent re-encryption;
+- a close Frame followed by a trailing state-creating Frame in the same authenticated Record;
 - Stream lifecycle violation.
 
 The endpoint returns or internally records the error class required by the specification and applies the failure scope required by ERROR-HANDLING.md.
@@ -564,7 +590,7 @@ A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
     Protocol Version: 4
-    Revision: Draft 10
+    Revision: Draft 11
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -586,10 +612,10 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 10 keeps development Protocol Version 4 and preserves the Draft 09 wire format, registry assignments, successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and baseline encrypted records.
+Draft 11 keeps development Protocol Version 4 and preserves the Draft 10 wire format, registry assignments, successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and baseline encrypted records.
 
-Draft 10 changes established-state semantics to close reliability ambiguities: a FIN superseded by RESET for application semantics remains a reliable Transmission until its own required acknowledgement is received; final-size contradictions consistently use FINAL_SIZE_ERROR; and every confirmation is checked against the original Transmission's required confirmation class.
+Draft 11 tightens recovery and progress semantics without adding a new Core numeric assignment: ambiguous establishment gets an authenticated recovery contract; reliable Transmission allocation cannot leave silently abandoned ID holes; recovery refresh obligations are explicit; RESET_STREAM/STOP_SENDING reason codes are separated semantically from Core failure-scope codes; and Secure Record send-sequence lifecycle is made explicit.
 
-Draft 09 and Draft 10 are therefore wire-compatible but are not guaranteed to behave identically in these edge cases. A Draft 09 implementation following the old FIN rule can stall the contiguous retirement watermark, and an implementation that accepts a wrong confirmation class can settle a Transmission that Draft 10 rejects.
+Draft 10 and Draft 11 are wire-compatible but are not guaranteed to make identical liveness/resource decisions in these edge cases. A Draft 10 implementation can still be interoperable on ordinary successful paths while lacking Draft 11 recovery/progress guarantees.
 
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 10 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 11 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

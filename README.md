@@ -14,7 +14,7 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 10
+**Specification revision:** Draft 11
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
@@ -50,7 +50,9 @@ It provides:
 
 The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when an outstanding Transmission is retransmitted or reinjected across different Carriers.
 
-Draft 10 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
+Draft 11 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
+
+Draft 11 is a freeze-preparation revision: it adds no scheduler or Relay topology to Core and no new successful-handshake wire element. It closes ambiguous-establishment recovery and reliable-state progress contracts and strengthens executable validation coverage.
 
 ## Interoperability material
 
@@ -79,6 +81,11 @@ Draft 10 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol
 - [Identity lifecycle and exhaustion cases](test-vectors/identity-lifecycle.json)
 - [Reordering, retirement, and record-size cases](test-vectors/reordering-reliability.json)
 - [Confirmation-type validity cases](test-vectors/confirmation-validity.json)
+- [Ambiguous establishment recovery cases](test-vectors/handshake-ambiguity.json)
+- [Recovery credit / retirement progress cases](test-vectors/recovery-progress.json)
+- [Reliable Transmission allocation cases](test-vectors/transmission-allocation.json)
+- [Terminal flow-control cases](test-vectors/terminal-flow-control.json)
+- [Close ordering and unknown-reason cases](test-vectors/close-ordering.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
 Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, handshake rejection, identifier exhaustion, local Carrier-selection invariants, and failure scope.
@@ -105,10 +112,11 @@ Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
 ## Repository validation
 
-The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, complete Secure Record metadata/wire consistency, review-driven state oracles, confirmation-type rules, and generated TCP fixtures.
+The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, complete Secure Record metadata/wire consistency, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, and mutation checks that also run under Python optimization.
 
     python tools/generate_tcp_fixtures.py --check
     python tools/validate.py
+    python -O tools/validate.py
     python tools/mutation_test.py
 
 GitHub Actions runs the same checks on pushes and pull requests. Protocol integers beyond the JavaScript safe-integer range are represented as decimal strings in JSON vectors.
@@ -164,10 +172,16 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── identity-lifecycle.json
     │   ├── reordering-reliability.json
     │   ├── confirmation-validity.json
+    │   ├── handshake-ambiguity.json
+    │   ├── recovery-progress.json
+    │   ├── transmission-allocation.json
+    │   ├── terminal-flow-control.json
+    │   ├── close-ordering.json
     │   └── tcp-binding.json
     ├── tools/
     │   ├── generate_tcp_fixtures.py
     │   ├── validate.py
+    │   ├── semantic_validation.py
     │   └── mutation_test.py
     └── .github/
         ├── workflows/

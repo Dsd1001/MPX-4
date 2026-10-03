@@ -1,0 +1,36 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 11",
+  "document": "SPECIFICATION.md",
+  "cases": [
+    {
+      "name": "tentative-reservation-not-allocation",
+      "reserved_local_id": 2,
+      "immutable_reliable_state_committed": false,
+      "next_protocol_transmission_id": 2,
+      "expected": "not_allocated"
+    },
+    {
+      "name": "formal-allocation",
+      "next_protocol_transmission_id": 2,
+      "immutable_reliable_state_committed": true,
+      "expected_allocated": 2,
+      "next_after": 3
+    },
+    {
+      "name": "allocated-cannot-disappear",
+      "allocated": 2,
+      "confirmation_received": false,
+      "session_open": true,
+      "eligible_carrier": true,
+      "local_cancel": true,
+      "expected": "remains_outstanding_eventual_attempt"
+    },
+    {
+      "name": "resource-failure-after-allocation",
+      "allocated": 2,
+      "cannot_preserve_reliability_state": true,
+      "expected": "SESSION_CLOSE_RESOURCE_LIMIT_when_possible"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # MPX/4 Core Protocol Specification
 
 **Document:** MPX/4 Core Protocol  
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4  
 **Status:** Working Draft
 
@@ -96,7 +96,7 @@ Transport Binding
 
 Loss of an individual Carrier does not by itself terminate the Session. If the last active Carrier is lost or closed without SESSION_CLOSE, an endpoint that retains the Session enters DORMANT state as defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-DORMANT retention duration is local implementation policy in Draft 10 and is not a negotiated availability guarantee.
+DORMANT retention duration is local implementation policy in Draft 11 and is not a negotiated availability guarantee.
 
 Stream byte ordering is defined by Stream offsets, not Carrier order.
 
@@ -106,7 +106,7 @@ MPX/4 Core is defined independently of transport packet boundaries.
 
 A transport binding specifies how one MPX Carrier maps onto an underlying ordered transport, including connection establishment, byte-stream parsing, transport loss, replacement, and close behavior.
 
-The normative baseline binding for Draft 10 is:
+The normative baseline binding for Draft 11 is:
 
 - [MPX/4 over TCP](bindings/tcp.md)
 
@@ -247,7 +247,7 @@ Each handshake message is:
     Message Length      VarInt
     Message Body        Message Length octets
 
-Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 10.
+Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 11.
 
 ### 7.2. Parameter format
 
@@ -260,7 +260,7 @@ CLIENT_INIT and SERVER_INIT contain Parameters:
 
 Bit 0 of Flags is CRITICAL. Bits 1 through 7 are reserved and MUST be zero.
 
-Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 10.
+Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 11.
 
 An endpoint receiving an unknown Parameter with CRITICAL=0 MUST ignore its value after validating its encoded length.
 
@@ -315,7 +315,7 @@ SERVER_NONCE appears only in SERVER_INIT.
 
 MAX_FRAME_PAYLOAD is the maximum STREAM_DATA Data field, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 10 values are 1 through 32768.
+Valid Draft 11 values are 1 through 32768.
 
 A peer MUST NOT send a larger STREAM_DATA Data field.
 
@@ -323,7 +323,7 @@ A peer MUST NOT send a larger STREAM_DATA Data field.
 
 MAX_RECORD_SIZE is the maximum Secure Record plaintext length, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 10 values are 1024 through 65536.
+Valid Draft 11 values are 1024 through 65536.
 
 The record header and 16-octet AEAD tag are not included in this value.
 
@@ -333,7 +333,7 @@ A sender MUST ensure that each complete Frame fits within one Secure Record and 
 
 MAX_STREAMS is the maximum number of simultaneously active peer-initiated Streams that the sender of the Parameter is willing to maintain.
 
-Valid Draft 10 values are 1 through 2048.
+Valid Draft 11 values are 1 through 2048.
 
 Stream IDs are not bounded by MAX_STREAMS; the value limits concurrency.
 
@@ -343,7 +343,7 @@ MAX_CARRIERS is a Session capability advertised independently by both endpoints.
 
 Its value is the maximum number of simultaneously active logical Carriers that the sender is willing to maintain in this Session. Valid values are 1 through 2^62 - 1.
 
-MAX_CARRIERS MUST be encoded with the Parameter CRITICAL flag set to 1. A Draft 10 endpoint receiving MAX_CARRIERS with CRITICAL=0 MUST abort the handshake with PROTOCOL_VIOLATION.
+MAX_CARRIERS MUST be encoded with the Parameter CRITICAL flag set to 1. A Draft 11 endpoint receiving MAX_CARRIERS with CRITICAL=0 MUST abort the handshake with PROTOCOL_VIOLATION.
 
 During CREATE:
 
@@ -481,9 +481,25 @@ Because transport-loss detection can occur at different times at the two endpoin
 
 Closing or losing a Carrier releases active concurrency capacity but does not make its Carrier ID reusable as a new identity. A later use of that same Carrier ID remains a replacement and MUST use a higher Generation.
 
+### 9.3. Ambiguous establishment recovery
+
+A Client enters an **ambiguous establishment** condition when it has sent a valid CLIENT_FINISHED for a candidate Carrier but the candidate transport ends before the Client authenticates SERVER_FINISHED. In that condition the Server may or may not have committed the candidate.
+
+The Client MUST NOT infer Server commit or non-commit from transport loss or from HANDSHAKE_REJECT. HANDSHAKE_REJECT is unauthenticated; SESSION_NOT_FOUND and other reject codes are advisory diagnostics, not authenticated Session-existence evidence.
+
+Until recovery succeeds or local policy abandons the ambiguous state, the Client MUST retain enough information to avoid identity reuse, including the Session ID, CREATE/JOIN intent, candidate Carrier ID and Generation, the highest locally attempted ambiguous Generation for that Carrier ID, and the received SERVER_INIT/negotiated Session parameters needed to compare a later authenticated result.
+
+For an already accepted logical Carrier ID, a replacement retry after ambiguous Generation G MUST use a Generation strictly greater than both the locally Highest Accepted Generation and every ambiguity-causing attempted Generation retained for that Carrier ID. A successful authenticated higher Generation resolves the ambiguity without claiming that an unverified earlier Generation was locally accepted.
+
+For the ambiguous first use of a previously unused Carrier ID at Generation 0, the Client MUST NOT retry that same ID at a non-zero Generation unless it has authenticated evidence that Generation 0 was accepted. Recovery instead uses another previously unused Carrier ID at Generation 0, subject to normal Session existence, Effective Carrier Limit, and authentication rules.
+
+After an ambiguous CREATE, the Client MAY attempt an authenticated JOIN to the same retained Session ID using a previously unused Carrier ID at Generation 0. A successfully authenticated JOIN proves that the Server retained compatible Session state. An unauthenticated rejection does not prove the opposite. Local policy MAY abandon the ambiguous Session; a subsequent independent CREATE then uses a fresh random Session ID rather than intentionally reusing the ambiguous ID.
+
+Ambiguous recovery is a liveness mechanism, not an exception to authentication, Session-version, Generation, parameter-equality, or Carrier-limit rules.
+
 ## 10. MPX/4 key schedule
 
-Draft 10 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
+Draft 11 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
 
 ### 10.1. MPX-Expand-Label
 
@@ -638,7 +654,7 @@ Wire format:
 
 ### 11.1. Record Flags
 
-Draft 10 defines no Record Flags.
+Draft 11 defines no Record Flags.
 
 Senders MUST transmit 0x00.
 
@@ -658,11 +674,13 @@ Each direction has an independent 64-bit Record Sequence Number.
 
 The first Secure Record in each direction uses Sequence Number 0.
 
-The sequence number increments by one after every successfully generated or authenticated record.
+The receive sequence number increments by one after every successfully authenticated record.
+
+For sending, a sequence number is assigned when the complete serialized Secure Record is committed to the ordered Carrier output. Once assigned, that exact serialized Record MUST be the next Secure Record emitted in that direction. The sender MUST NOT discard that record, advance the sequence number, and continue emitting later records on the same Carrier. If ordered emission can no longer be guaranteed, the endpoint MUST abandon that Carrier rather than create a sequence gap or reuse a nonce.
 
 The sequence number is not transmitted.
 
-Draft 10 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
+Draft 11 permits at most 2^24 Secure Records, numbered 0 through 2^24-1, in one direction under one application traffic key. An endpoint MUST establish a fresh Carrier handshake before sending any additional record under a fresh key. If replacement is not ready when the limit is reached, that direction stops generating records on the exhausted key; sequence numbers and nonces never wrap or reuse.
 
 ### 11.4. Nonce construction
 
@@ -707,7 +725,7 @@ Unknown Frame handling is determined by the registered range:
 - unknown values in the Core range 0x00 through 0x3f are a PROTOCOL_VIOLATION;
 - unknown values in the Extension range 0x40 through 0x3fff MUST be skipped by Frame Length unless a negotiated extension specifies stronger behavior;
 - values in the Private Use range 0x4000 through 0x7fff are valid only under an explicitly negotiated private profile;
-- all higher values are reserved and MUST be rejected in Draft 10.
+- all higher values are reserved and MUST be rejected in Draft 11.
 
 ### 12.2. PADDING
 
@@ -720,6 +738,10 @@ Its body has no semantic meaning and is ignored. Senders SHOULD fill PADDING bod
 Transmission IDs are Session-wide positive VarInts.
 
 A sender allocates Transmission IDs as consecutive positive integers beginning at 1: 1, 2, 3, .... A Transmission ID MUST NOT be skipped, reused within a Session after allocation, or wrapped. The maximum allocatable Transmission ID is 2^62 - 1.
+
+A Transmission ID becomes protocol-allocated only when the sender commits an immutable semantic reliable Frame into Session reliability state. An implementation MAY reserve queue slots or tentative local numbers before that point, but such local reservations are not allocated Transmission IDs and MUST NOT advance the protocol allocation sequence.
+
+Once a reliable Transmission ID is allocated, the sender MUST NOT silently abandon or recycle it. While the Session remains usable, the Transmission remains outstanding until its required confirmation is received and MUST eventually receive an Attempt whenever an authenticated eligible Carrier and required flow-control/state preconditions exist. Local cancellation may change later application semantics only through the protocol rules for that operation; it does not erase an already allocated reliable Transmission. If a local resource failure makes this responsibility impossible to preserve safely, the endpoint MUST close the Session with RESOURCE_LIMIT when an authenticated writable Carrier is available.
 
 After allocating Transmission ID 2^62 - 1, that endpoint's Transmission-ID namespace is exhausted for the Session. It MUST NOT allocate another reliable Transmission ID. Existing Transmissions and non-reliable/idempotent protocol state may continue to be processed. If further application or protocol work requires allocation of another reliable Transmission, the endpoint MUST transition the Session to CLOSING and SHOULD send SESSION_CLOSE with RESOURCE_LIMIT on an authenticated writable Carrier.
 
@@ -752,7 +774,7 @@ For every locally allocated reliable Transmission, the sender MUST retain the Tr
 
 ## 14. Stream identifiers and opening
 
-Draft 10 supports Client-initiated bidirectional Streams.
+Draft 11 supports Client-initiated bidirectional Streams.
 
 Client Stream IDs are positive odd integers allocated monotonically:
 
@@ -859,7 +881,7 @@ Body:
 
 Each endpoint maintains **Settled Through**, the largest N such that every locally allocated reliable Transmission ID from 1 through N has been settled by its required confirmation. Because Transmission IDs are consecutive, Settled Through advances only across a contiguous settled prefix.
 
-When Settled Through advances above the last value advertised to the peer, the endpoint MUST eventually advertise a TRANSMISSION_RETIRE value at least that large whenever the Session has an authenticated writable Carrier. Multiple advances MAY be coalesced into one larger watermark, and the current value MAY be repeated on any active Carrier. After DORMANT recovery, Carrier establishment, or replacement, an endpoint SHOULD refresh the current watermark when doing so can release retained peer state.
+When Settled Through advances above the last value advertised to the peer, the endpoint MUST eventually advertise a TRANSMISSION_RETIRE value at least that large whenever the Session has an authenticated writable Carrier. Multiple advances MAY be coalesced into one larger watermark, and the current value MAY be repeated on any active Carrier. After DORMANT recovery, Carrier establishment, or replacement, when the current watermark is non-zero and can release retained peer state, the endpoint MUST eventually refresh it while the Session remains active and an authenticated writable Carrier exists. Repeated refreshes MAY be coalesced and rate-limited.
 
 A received TRANSMISSION_RETIRE value is monotonic Session state for the peer's Transmission namespace:
 
@@ -899,7 +921,7 @@ Maximum Offset is an exclusive upper bound. A sender may commit bytes only when 
 
 A receiver generating STREAM_CREDIT MUST make Consumed Offset and Maximum Offset monotonically non-decreasing across successive advertisements.
 
-On receipt, each STREAM_CREDIT pair is first validated structurally. Maximum Offset MUST be greater than or equal to Consumed Offset, and the advertised window MUST satisfy the Draft 10 limit below. After structural validation, let `(C,M)` be the currently retained pair and `(C',M')` the received pair:
+On receipt, each STREAM_CREDIT pair is first validated structurally. Maximum Offset MUST be greater than or equal to Consumed Offset, and the advertised window MUST satisfy the Draft 11 limit below. After structural validation, let `(C,M)` be the currently retained pair and `(C',M')` the received pair:
 
 - if `C' >= C` and `M' >= M`, the advertisement is current or newer and the endpoint retains `(C',M')`;
 - if `C' <= C` and `M' <= M`, the advertisement is stale or duplicate due to cross-Carrier reordering and is ignored;
@@ -907,7 +929,7 @@ On receipt, each STREAM_CREDIT pair is first validated structurally. Maximum Off
 
 This receive rule is component-wise; endpoints MUST NOT reject a fully stale credit advertisement merely because a newer advertisement arrived first on another Carrier.
 
-Draft 10 limits:
+Draft 11 limits:
 
     Maximum Offset - Consumed Offset <= 16 MiB
 
@@ -934,19 +956,21 @@ Body:
 
 Consumed Bytes is the cumulative number of committed Stream bytes that the receiver has released from Session receive accounting.
 
-Maximum Bytes is the absolute upper bound on the sender's cumulative Session committed-byte counter.
+Maximum Bytes is the absolute upper bound on the sender's cumulative Session committed-byte counter. Session committed and consumed counters are non-wrapping VarInts. Once no larger representable Maximum Bytes can be granted, the receiver MUST NOT authorize additional new commitment beyond 2^62 - 1; applications needing further data use a new Session.
 
 A receiver generating SESSION_CREDIT MUST make Consumed Bytes and Maximum Bytes monotonically non-decreasing across successive advertisements.
 
-On receipt, each SESSION_CREDIT pair is first validated structurally. Maximum Bytes MUST be greater than or equal to Consumed Bytes, and the advertised window MUST satisfy the Draft 10 limit below. Let `(C,M)` be the retained Session credit pair and `(C',M')` the received pair. The same component-wise merge rule as STREAM_CREDIT applies: component-wise newer values replace the retained pair, component-wise older/equal values are stale and ignored, and crossed values are a FLOW_CONTROL_ERROR.
+On receipt, each SESSION_CREDIT pair is first validated structurally. Maximum Bytes MUST be greater than or equal to Consumed Bytes, and the advertised window MUST satisfy the Draft 11 limit below. Let `(C,M)` be the retained Session credit pair and `(C',M')` the received pair. The same component-wise merge rule as STREAM_CREDIT applies: component-wise newer values replace the retained pair, component-wise older/equal values are stale and ignored, and crossed values are a FLOW_CONTROL_ERROR.
 
-Draft 10 limits:
+Draft 11 limits:
 
     Maximum Bytes - Consumed Bytes <= 128 MiB
 
 The first authenticated Carrier of a Session MUST be followed by a SESSION_CREDIT advertisement in each direction before application data is sent in that direction.
 
-Additional Carriers do not create additional Session credit. STREAM_CREDIT and SESSION_CREDIT are Session state and MAY be carried on any active Carrier; an endpoint MAY refresh the current values after Carrier replacement.
+Additional Carriers do not create additional Session credit. STREAM_CREDIT and SESSION_CREDIT are Session state and MAY be carried on any active Carrier.
+
+After DORMANT-to-ACTIVE recovery or Carrier replacement, each endpoint MUST eventually refresh its current SESSION_CREDIT while the Session remains active and an authenticated writable Carrier exists. A receiver need not proactively repeat every Stream advertisement, but when retained Stream state exists and the peer sends a valid non-zero CREDIT_PROBE, the receiver MUST eventually send the current STREAM_CREDIT for that Stream together with a current SESSION_CREDIT, unless the Stream or Session becomes terminal first. Implementations MAY coalesce and rate-limit refreshes without preventing eventual progress.
 
 ## 18. Stream final size and directional termination
 
@@ -966,6 +990,8 @@ Final Offset is the exclusive end of the sending direction.
 
 It MUST NOT be smaller than any previously authenticated End Offset for that Stream.
 
+A STREAM_FIN Final Offset is a Stream commitment under Section 17.2. If it increases Committed Offset, the increase MUST satisfy the currently retained Stream Maximum Offset and the resulting cumulative Session committed-byte counter MUST NOT exceed retained Session Maximum Bytes. Exceeding either credit limit is FLOW_CONTROL_ERROR.
+
 After a valid final size has been established, any Frame implying a different final size or data beyond that final size is a FINAL_SIZE_ERROR.
 
 STREAM_FIN is reliable and is confirmed with TRANSMISSION_ACK.
@@ -977,11 +1003,13 @@ Body:
     Stream ID        VarInt
     Transmission ID  VarInt
     Final Offset     VarInt
-    Error Code       VarInt
+    Stream Error Code  VarInt
 
 RESET_STREAM terminates the sender's direction and declares its final size.
 
-The final-size invariants for STREAM_FIN also apply to RESET_STREAM.
+The final-size and flow-control commitment invariants for STREAM_FIN also apply to RESET_STREAM.
+
+Stream Error Code is an opaque VarInt termination reason carried for the Stream/application contract. It is not a Core Error Code report and does not inherit the failure scope assigned by the Core Error Code registry. Applications or profiles may define Stream Error Code meanings; an unknown value does not by itself change Session or Carrier failure scope.
 
 RESET_STREAM is reliable and is confirmed with TRANSMISSION_ACK.
 
@@ -991,11 +1019,13 @@ Body:
 
     Stream ID        VarInt
     Transmission ID  VarInt
-    Error Code       VarInt
+    Stream Error Code  VarInt
 
 STOP_SENDING requests that the peer cease transmission in the opposite direction.
 
-A peer that has not already completed that sending direction SHOULD respond by issuing RESET_STREAM.
+Its Stream Error Code has the same opaque Stream/application namespace as RESET_STREAM and MUST NOT be interpreted as a Core protocol-failure declaration.
+
+A peer that has not already completed that sending direction SHOULD respond by issuing RESET_STREAM, normally carrying the same Stream Error Code unless the local application/profile selects another reason.
 
 STOP_SENDING is reliable and is confirmed with TRANSMISSION_ACK.
 
@@ -1025,7 +1055,7 @@ A non-zero Stream ID requests the current STREAM_CREDIT for that Stream and a cu
 
 CREDIT_PROBE does not alter credit and MAY be repeated.
 
-A receiver that still has relevant state SHOULD answer promptly. Absence of an answer is not itself a protocol violation.
+A receiver that still has the requested relevant state MUST eventually answer while the Session remains active and an authenticated writable Carrier exists. For Stream ID 0 it sends current SESSION_CREDIT. For a retained non-zero Stream it sends current STREAM_CREDIT and current SESSION_CREDIT. The response MAY be coalesced or rate-limited. If the requested state has already been retired or the Session/Stream becomes terminal first, no response is required.
 
 ## 20. PING and PONG
 
@@ -1064,7 +1094,9 @@ Trigger Frame Type is 0 when no specific Frame triggered the closure.
 
 Reason is diagnostic only and MUST NOT exceed 256 octets. Protocol behavior MUST NOT depend on Reason text.
 
-After CARRIER_CLOSE, no new Secure Records are sent on that Carrier.
+CARRIER_CLOSE MUST be the final Frame in the Secure Record containing it. After CARRIER_CLOSE, no new Secure Records are sent on that Carrier. A receiver MUST NOT allow any authenticated trailing Frame after CARRIER_CLOSE to create new protocol or application state.
+
+An unrecognized Error Code from a valid negotiated extension or private-profile range is treated as an unknown diagnostic reason and does not cancel the Carrier terminal action.
 
 ### 21.2. SESSION_CLOSE
 
@@ -1072,7 +1104,9 @@ SESSION_CLOSE uses the same body format as CARRIER_CLOSE but applies to the enti
 
 After SESSION_CLOSE is processed, no new Streams or Carriers may be created for that Session ID and all active Carriers are closed.
 
-A sender MAY transmit SESSION_CLOSE on more than one active Carrier to improve delivery of the terminal state.
+SESSION_CLOSE MUST be the final Frame in each Secure Record containing it. A sender MAY transmit SESSION_CLOSE on more than one active Carrier to improve delivery of the terminal state. A receiver MUST NOT allow authenticated trailing Frames after SESSION_CLOSE to create new protocol or application state.
+
+An unrecognized Error Code from a valid negotiated extension or private-profile range is treated as an unknown diagnostic reason and does not cancel the Session terminal action.
 
 ## 22. Error handling and failure scope
 
@@ -1140,7 +1174,7 @@ to estimate path behavior.
 
 A first-attempt STREAM_DATA acknowledgement returned on the same Carrier can provide a path-specific delivery sample.
 
-Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 10 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
+Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 11 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
 
 Delivery-rate estimation SHOULD avoid treating application-limited traffic as path capacity.
 
@@ -1148,7 +1182,7 @@ Delivery-rate estimation SHOULD avoid treating application-limited traffic as pa
 
 The normative MPX/4 state machines, Frame-validity matrices, cross-Carrier reordering rules, terminal Stream rules, tombstone requirements, and retired-identity behavior are defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-That document is part of the MPX/4 Core specification for Draft 10.
+That document is part of the MPX/4 Core specification for Draft 11.
 
 In particular, conforming implementations MUST support:
 
@@ -1164,7 +1198,7 @@ An implementation MAY use different internal state names or data structures, but
 
 ## 27. Resource limits
 
-Draft 10 Core limits are:
+Draft 11 Core limits are:
 
 | Limit | Value |
 |---|---:|
@@ -1216,7 +1250,7 @@ Implementations MUST validate lengths and integer arithmetic before allocation, 
 
 Implementations SHOULD bound unauthenticated handshake state, pending reliable Transmissions, receive buffering, and failed authentication work.
 
-Draft 10 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
+Draft 11 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
 
 ## 30. Wire-size considerations
 
@@ -1230,7 +1264,7 @@ MPX Frame and Secure Record sizes are protocol limits, not network MTUs. The und
 
 ## 31. Conformance requirements
 
-A conforming Draft 10 implementation MUST:
+A conforming Draft 11 implementation MUST:
 
 - recognize the MPX/4 Connection Preface;
 - reject non-canonical VarInts;
@@ -1241,7 +1275,7 @@ A conforming Draft 10 implementation MUST:
 - compute and retain the immutable Effective Carrier Limit as the minimum of the two CREATE-time MAX_CARRIERS advertisements;
 - accept non-zero CARRIER_ID values across the full MPX VarInt range independently of Carrier concurrency;
 - enforce Active Carrier Count against the Effective Carrier Limit;
-- implement the Draft 10 key schedule exactly;
+- implement the Draft 11 key schedule exactly;
 - implement CLIENT_FINISHED and SERVER_FINISHED verification;
 - implement HANDSHAKE_REJECT as an unauthenticated candidate-only rejection signal without mutating existing Session state or triggering downgrade;
 - implement AES-256-GCM Secure Records with the specified nonce and AAD construction;
@@ -1272,11 +1306,11 @@ A conforming Draft 10 implementation MUST:
 - ignore unsupported optional scheduling or path-metadata extensions safely when their defining extension permits it;
 - implement at least one conforming transport binding;
 - when claiming TCP interoperability, implement bindings/tcp.md;
-- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 10 Core interoperability claim.
+- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 11 Core interoperability claim.
 
 ## 32. Future work
 
-The following remain outside Draft 10:
+The following remain outside Draft 11:
 
 - ephemeral key exchange and forward secrecy;
 - datagram transport;
@@ -1287,7 +1321,7 @@ The following remain outside Draft 10:
 - explicit Carrier migration;
 - standardized scheduler algorithms or profiles;
 - additional path-metadata extensions;
-- additional transport bindings beyond the Draft 10 TCP baseline.
+- additional transport bindings beyond the Draft 11 TCP baseline.
 
 ## 33. Normative references
 
@@ -1319,7 +1353,7 @@ An interoperable MPX/4 implementation preserves these invariants:
 14. Transmission IDs, Stream IDs, and Carrier Generations never wrap; Session, Carrier, Stream, and Transmission identities are never reused contrary to their lifetime rules.
 15. A rejected pre-establishment candidate cannot mutate an existing Session.
 
-## Appendix B. Draft 10 wire constants
+## Appendix B. Draft 11 wire constants
 
     Protocol magic                     4d 50 58 00
     Protocol version                   4

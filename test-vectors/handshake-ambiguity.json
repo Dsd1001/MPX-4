@@ -1,0 +1,37 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 11",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "replacement-server-finished-lost",
+      "local_highest_accepted_generation": 3,
+      "ambiguous_attempt_generation": 4,
+      "server_commit": "unknown",
+      "next_retry_generation": 5,
+      "expected": "higher_than_accepted_and_ambiguous_attempt"
+    },
+    {
+      "name": "first-id-server-finished-lost",
+      "carrier_id_state": "UNUSED_locally",
+      "ambiguous_attempt_generation": 0,
+      "expected_recovery": "different_unused_carrier_id_generation_0",
+      "same_id_generation_1": "forbidden_without_authenticated_acceptance"
+    },
+    {
+      "name": "create-server-finished-lost",
+      "session_id_retained": true,
+      "recovery_action": "JOIN_same_session_new_unused_carrier_gen0",
+      "authenticated_join_success": "confirms_session_retained",
+      "unauthenticated_SESSION_NOT_FOUND": "advisory_only",
+      "expected": "do_not_reuse_reject_as_existence_proof"
+    },
+    {
+      "name": "abandon-ambiguous-create",
+      "local_policy": "abandon",
+      "old_session_id": "retained_ambiguous",
+      "new_create_session_id": "fresh_random",
+      "expected": "fresh_session_id_required"
+    }
+  ]
+}

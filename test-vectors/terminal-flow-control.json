@@ -1,0 +1,47 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 11",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "fin-at-stream-credit",
+      "frame": "STREAM_FIN",
+      "old_committed": 8,
+      "final_offset": 10,
+      "stream_maximum": 10,
+      "session_committed_before": 100,
+      "session_maximum": 102,
+      "expected": "apply"
+    },
+    {
+      "name": "fin-beyond-stream-credit",
+      "frame": "STREAM_FIN",
+      "old_committed": 8,
+      "final_offset": 11,
+      "stream_maximum": 10,
+      "session_committed_before": 100,
+      "session_maximum": 200,
+      "expected": "FLOW_CONTROL_ERROR"
+    },
+    {
+      "name": "reset-beyond-session-credit",
+      "frame": "RESET_STREAM",
+      "old_committed": 8,
+      "final_offset": 10,
+      "stream_maximum": 20,
+      "session_committed_before": 100,
+      "session_maximum": 101,
+      "expected": "FLOW_CONTROL_ERROR"
+    },
+    {
+      "name": "conflicting-final-precedes-credit",
+      "frame": "RESET_STREAM",
+      "established_final": 9,
+      "final_offset": 10,
+      "stream_maximum": 20,
+      "session_committed_before": 100,
+      "session_maximum": 200,
+      "expected": "FINAL_SIZE_ERROR"
+    }
+  ]
+}

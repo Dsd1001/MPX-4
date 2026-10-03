@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 10
+**Registry Revision:** Draft 11
 
 This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
@@ -35,6 +35,8 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x40–0x3fff | — | Extension |
 | 0x4000–0x7fff | — | Private Use |
 | 0x8000–2^62-1 | — | Reserved |
+
+The Extension/Private Use ranges above are allocation spaces, not generic insertion points. Draft 11 has no generic unknown-handshake-message skip rule. A specification using an additional Handshake Message Type MUST define negotiation, placement/order, transcript participation, and unsupported-peer behavior before the value is interoperable.
 
 ## 3. Handshake Parameter Types
 
@@ -124,6 +126,8 @@ Private Use values require an explicitly negotiated private profile and are not 
 
 Failure scope is part of the Error Code semantics. The complete required actions are defined in [ERROR-HANDLING.md](ERROR-HANDLING.md).
 
+The Stream Error Code fields in RESET_STREAM and STOP_SENDING use a separate opaque Stream/application reason namespace despite having the same VarInt representation. Values carried there do not inherit this Core Error Code registry or its failure scope.
+
 AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close an unauthenticated Carrier without sending a wire error before ESTABLISHED.
 
 ## 6. Parameter Flags
@@ -131,7 +135,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 10 |
+| 1–7 | RESERVED | MUST be zero in Draft 11 |
 
 ## 7. Registry stability
 

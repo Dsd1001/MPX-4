@@ -4,6 +4,49 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
+## Draft 11 — 2026-10-04
+
+Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cross-review. It keeps Protocol Version 4 and the Draft 10 wire format while closing recovery/progress contracts and making repository validation coverage explicit and fail-closed.
+
+### Establishment recovery and progress
+
+- Defines the Client-side ambiguous-establishment condition when CLIENT_FINISHED was sent but SERVER_FINISHED was not authenticated.
+- Recovery never treats unauthenticated HANDSHAKE_REJECT, including SESSION_NOT_FOUND, as proof that Server Session state exists or does not exist.
+- Existing logical-Carrier replacement retries use a Generation above every locally accepted or ambiguity-causing attempted Generation; an ambiguous first use of a Carrier ID instead recovers through another unused Carrier ID at Generation 0.
+- An ambiguous CREATE can probe the retained Session ID with an authenticated JOIN, or be locally abandoned in favor of a fresh Session ID; the ambiguous Session ID is not intentionally reused for CREATE while recovery state is retained.
+- After DORMANT recovery or Carrier replacement, required Session credit, probed Stream credit, and useful TRANSMISSION_RETIRE watermarks now have eventual refresh obligations while authenticated writable Carrier state exists.
+- Transmission ID allocation is tied to committing immutable reliable semantic state. Once allocated, a reliable Transmission cannot be silently abandoned; it remains outstanding until its required confirmation or Session closure.
+
+### Stream termination and error namespaces
+
+- FIN and RESET explicitly cross-reference the existing Stream and Session commitment/credit rules. A terminal Final Offset that raises commitment beyond retained credit is FLOW_CONTROL_ERROR; an already-established contradictory final size remains FINAL_SIZE_ERROR.
+- RESET_STREAM and STOP_SENDING now name their carried reason as Stream Error Code. It is an opaque Stream/application termination reason and does not inherit Core Error Code failure scope. The VarInt wire layout is unchanged.
+
+### Secure Record lifecycle and close ordering
+
+- Once a send sequence number is assigned to a serialized Secure Record, that exact record is the next record emitted in that direction; implementations may not skip a generated record and continue with a later sequence number on the same Carrier.
+- The TCP Client is responsible for initiating fresh Carrier replacement sufficiently before either traffic direction reaches the 2^24-record key lifetime when continued service is required. The old key is never used beyond the limit.
+- CARRIER_CLOSE and SESSION_CLOSE are terminal within their Secure Record: senders place them last, and trailing authenticated Frames cannot create protocol state.
+- A syntactically valid unknown extension/private reason in CARRIER_CLOSE or SESSION_CLOSE does not cancel the terminal action.
+
+### Security and compatibility boundaries
+
+- Draft 11 explicitly documents that Core has no on-wire PSK selector. The transport key is selected by the configured service context before Finished verification; multi-key shared listeners need external demultiplexing or a negotiated extension.
+- Unaudited VERSION_NEGOTIATION still enforces local enabled/minimum policy but does not prove the highest mutually supported version. Deployments requiring strict downgrade resistance pin the permitted minimum/version until an authenticated compatible-version mechanism is defined.
+- Generic extension Handshake Message insertion is not implied by registry range allocation; an extension must define negotiation, placement, transcript participation, and unsupported behavior before such a message can be used.
+
+### Validation
+
+- Removes protocol-validator dependence on Python assert so checks remain active under python -O.
+- Validates Secure Record Flags=0 and credit structural validity before stale/newer merge.
+- Executes semantic handlers for the previously metadata-only MAX_CARRIERS, Session lifecycle, version compatibility, HANDSHAKE_REJECT, identity lifecycle, Carrier Generation, and error-scope vectors.
+- Expands Core Frame vectors to PADDING, PONG, CARRIER_CLOSE, and SESSION_CLOSE, making all 18 assigned Core Frame types executable.
+- Adds recovery, terminal-flow-control, Transmission-allocation, and close-ordering vectors plus matching mutation coverage.
+
+### Compatibility
+
+Draft 11 retains development Protocol Version 4 and introduces no new Core numeric assignment or successful-handshake transcript change relative to Draft 10. RESET_STREAM/STOP_SENDING keep the same VarInt wire shape; Draft 11 clarifies that the field is a Stream/application reason rather than a Core failure-scope code. Recovery and liveness obligations are tightened before Version 4 stability.
+
 ## Draft 10 — 2026-10-04
 
 Draft 10 closes the remaining Draft 09 reliability-prefix and confirmation-validation gaps and hardens repository validation so that reported PASS results execute the claimed positive, negative, wire, and state checks.

@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 10 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 11 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -113,13 +113,13 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 10 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 11 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 10 derivation is defined in Section 10 of the Core specification.
+The exact Draft 11 derivation is defined in Section 10 of the Core specification.
 
 Because MAX_CARRIERS is part of CLIENT_INIT and SERVER_INIT, changing either advertisement changes the authenticated transcript and therefore changes Finished values and application traffic secrets.
 
@@ -219,7 +219,7 @@ The candidate transport then closes. HANDSHAKE_REJECT is unauthenticated, does n
 
 A Client receiving such a rejection does not treat it as permission to retry a lower Protocol Version.
 
-## Draft 10 notes
+## Draft 11 notes
 
 Handshake Parameters are encoded in strictly increasing Parameter-Type order.
 

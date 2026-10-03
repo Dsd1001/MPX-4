@@ -1,0 +1,37 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 11",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "dormant-recovery-session-credit",
+      "session_state": "ACTIVE_after_DORMANT",
+      "authenticated_writable_carrier": true,
+      "retained_session_credit": true,
+      "expected": "eventual_SESSION_CREDIT_refresh"
+    },
+    {
+      "name": "stream-probe-after-recovery",
+      "stream_state": "retained",
+      "probe_stream_id": 7,
+      "authenticated_writable_carrier": true,
+      "expected": [
+        "eventual_STREAM_CREDIT",
+        "eventual_SESSION_CREDIT"
+      ]
+    },
+    {
+      "name": "retire-refresh-after-recovery",
+      "retired_through": 27,
+      "can_release_peer_state": true,
+      "authenticated_writable_carrier": true,
+      "expected": "eventual_TRANSMISSION_RETIRE_refresh"
+    },
+    {
+      "name": "no-writable-carrier",
+      "session_state": "DORMANT",
+      "authenticated_writable_carrier": false,
+      "expected": "refresh_deferred"
+    }
+  ]
+}

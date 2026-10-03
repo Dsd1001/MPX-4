@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -72,7 +72,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 10 does not define or reserve a well-known TCP port.
+MPX/4 Draft 11 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -231,7 +231,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 10.
+The exact deadline is local policy and is not negotiated by Draft 11.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -307,6 +307,8 @@ The candidate TCP connection does not become the current Carrier merely by conne
 
 The new TCP connection never resumes the old Carrier cryptographic record stream.
 
+If a TCP candidate is lost after the Client sent CLIENT_FINISHED but before it authenticates SERVER_FINISHED, the Client follows the Core ambiguous-establishment recovery rules rather than assuming that the Server did or did not commit the candidate.
+
 A failed replacement handshake is discarded without changing the Session Protocol Version, current Generation, Active Carrier Count, Effective Carrier Limit, or existing Session state.
 
 If the candidate would reactivate an inactive logical Carrier while the Session is already at its Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT before Generation commit.
@@ -314,6 +316,8 @@ If the candidate would reactivate an inactive logical Carrier while the Session 
 If the candidate replaces an already active logical Carrier, it does not require an additional active Carrier slot.
 
 After a higher Generation is accepted, lower-Generation TCP connections for the same Carrier ID are superseded according to the Core state machine and SHOULD be closed promptly.
+
+Because the TCP Client is the endpoint that initiates replacement connections, a Client that requires continued service MUST track the number of records it has sent and received under each Carrier traffic key and initiate a fresh Carrier handshake sufficiently before either direction reaches the 2^24-record limit. No fixed safety margin can guarantee availability across arbitrary network failure; if replacement is not established before exhaustion, the exhausted direction stops generating records and the Carrier may be closed.
 
 Session-level reliable Transmission state continues across the replacement. Retransmission or reinjection on the replacement retains the original Transmission ID.
 
@@ -408,7 +412,7 @@ Different Carriers MAY connect to different server addresses when those endpoint
 
 ## 28. Maximum sizes and TCP
 
-MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values. MAX_RECORD_SIZE is Session-scoped in Draft 10; every JOIN repeats the CREATE-time directional value, so any eligible Carrier in the Session can carry an already-created Frame that satisfied the Session limits.
+MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values. MAX_RECORD_SIZE is Session-scoped in Draft 11; every JOIN repeats the CREATE-time directional value, so any eligible Carrier in the Session can carry an already-created Frame that satisfied the Session limits.
 
 An MPX Secure Record larger than one TCP segment is valid.
 

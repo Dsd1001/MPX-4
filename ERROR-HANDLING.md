@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 10
+**Revision:** Draft 11
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -157,6 +157,13 @@ For example:
 
 An implementation MUST NOT widen or narrow failure scope merely because a different Error Code would be operationally more convenient.
 
+
+## 5.1. Stream termination reason codes
+
+The Stream Error Code fields carried by RESET_STREAM and STOP_SENDING are not instances of the Core Error Code registry in REGISTRIES.md. They are opaque Stream/application termination reasons and carry no Core failure scope. Receiving RESET_STREAM(Stream Error Code=0x09), for example, does not report FLOW_CONTROL_ERROR and does not by itself require SESSION_CLOSE.
+
+Core protocol violations are still detected locally and acted on using the Core Error Code/failure-scope rules in this document. An application/profile may define Stream Error Code meanings without changing those rules.
+
 ## 6. Trigger Frame Type
 
 CARRIER_CLOSE and SESSION_CLOSE contain Trigger Frame Type.
@@ -171,6 +178,8 @@ Trigger Frame Type is zero when:
 - the failure was caused by transport loss or another condition without a Core Frame Type.
 
 Reason text is diagnostic only and MUST NOT change the scope or behavior defined by this document.
+
+For CARRIER_CLOSE and SESSION_CLOSE, a syntactically valid but unrecognized Error Code from a negotiated extension/private range does not invalidate the terminal action. The receiver closes at the scope selected by the Frame type and treats the reason as unknown. This does not make unassigned Core-range values or unnegotiated private-profile values valid.
 
 ## 7. Authentication and integrity failures
 

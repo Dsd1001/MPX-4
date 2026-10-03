@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 10",
+  "revision": "Draft 11",
   "representation": "decrypted Frame bytes before Secure Record encryption",
   "vectors": [
     {
@@ -114,7 +114,7 @@
         "stream_id": "1",
         "transmission_id": "3",
         "final_offset": "10",
-        "error_code": "14"
+        "stream_error_code": "14"
       },
       "hex": "170401030a0e",
       "length": 6
@@ -125,7 +125,7 @@
       "fields": {
         "stream_id": "1",
         "transmission_id": "4",
-        "error_code": "14"
+        "stream_error_code": "14"
       },
       "hex": "180301040e",
       "length": 5
@@ -149,6 +149,46 @@
       },
       "hex": "010101",
       "length": 3
+    },
+    {
+      "name": "padding-two-octets",
+      "frame_type": "PADDING",
+      "fields": {
+        "padding_hex": "0000"
+      },
+      "hex": "00020000",
+      "length": 4
+    },
+    {
+      "name": "pong",
+      "frame_type": "PONG",
+      "fields": {
+        "token": "1"
+      },
+      "hex": "020101",
+      "length": 3
+    },
+    {
+      "name": "carrier-close",
+      "frame_type": "CARRIER_CLOSE",
+      "fields": {
+        "error_code": "0",
+        "trigger_frame_type": "0",
+        "reason_utf8": "bye"
+      },
+      "hex": "0306000003627965",
+      "length": 8
+    },
+    {
+      "name": "session-close",
+      "frame_type": "SESSION_CLOSE",
+      "fields": {
+        "error_code": "0",
+        "trigger_frame_type": "0",
+        "reason_utf8": "done"
+      },
+      "hex": "0407000004646f6e65",
+      "length": 9
     }
   ]
 }

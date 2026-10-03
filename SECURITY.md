@@ -6,9 +6,9 @@ This document describes security requirements and operational guidance for MPX/4
 
 Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), [ERROR-HANDLING.md](ERROR-HANDLING.md), and [COMPATIBILITY.md](COMPATIBILITY.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 10 security profile
+## Draft 11 security profile
 
-The mandatory-to-implement Draft 10 profile uses:
+The mandatory-to-implement Draft 11 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -39,11 +39,13 @@ Keys SHOULD be provisioned through a confidential authenticated channel.
 
 Different administrative trust domains SHOULD use independent transport keys.
 
+Draft 11 defines no on-wire PSK identity or key selector. The deployment/service context MUST select the one transport key used to verify a candidate before Finished authentication is evaluated. A shared listener serving multiple transport keys therefore needs an external trusted demultiplexing context or a separately negotiated extension; Core does not standardize trial-decryption/verification across a key set. PSK selection is not itself peer authentication.
+
 A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 10 profile does not provide forward secrecy.
+The mandatory Draft 11 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -75,7 +77,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 10 uses a per-direction Record Sequence Number beginning at zero.
+Draft 11 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -83,7 +85,9 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 10 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 11 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+
+A sender that has assigned a sequence number to a complete serialized Record MUST emit that exact Record next or abandon the Carrier. Skipping a generated Record and continuing with a later sequence number would desynchronize the implicit nonce sequence; rolling the sequence number backward would risk nonce reuse.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -109,7 +113,7 @@ Retransmission and reinjection repeat the same Transmission ID. If the same Tran
 
 ## Stream-data integrity
 
-Draft 10 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 11 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -165,6 +169,8 @@ An endpoint MUST NOT respond to an authentication failure, Secure Record failure
 
 JOIN and replacement Carriers MUST use the immutable Session Protocol Version, preventing a lower-version Carrier from attaching to an already authenticated higher-version Session.
 
+The unauthenticated VERSION_NEGOTIATION mechanism does not prove the highest mutually supported version. If both a higher and lower version are locally permitted, an active attacker able to suppress/forge the initial negotiation may be able to induce retry of the lower permitted version. Deployments that require strict downgrade resistance SHOULD pin the required version or minimum so that such fallback is not locally permitted until an authenticated compatible-version negotiation mechanism is available.
+
 ## DORMANT Session retention
 
 A DORMANT Session intentionally retains authenticated Stream, flow-control, Generation, and reliable Transmission state while no Carrier is active.
@@ -216,8 +222,8 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 10 key derivation and Finished authentication;
-- Draft 10 Secure Record encryption;
+- Draft 11 key derivation and Finished authentication;
+- Draft 11 Secure Record encryption;
 - Stream state validity;
 - Carrier Generation replacement state;
 - MAX_CARRIERS negotiation and active Carrier accounting;
@@ -225,6 +231,11 @@ The repository provides machine-readable interoperability vectors for:
 - Protocol Version compatibility and cross-version Session isolation;
 - HANDSHAKE_REJECT encoding and unauthenticated candidate-only semantics;
 - Session-ID collision and Stream/Transmission identifier exhaustion;
+- ambiguous establishment and authenticated recovery boundaries;
+- recovery-time credit and retirement progress;
+- formal Transmission allocation and non-abandonment;
+- terminal Final Offset flow-control;
+- close ordering and unknown negotiated extension reasons;
 - Error Code failure scope.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
@@ -259,7 +270,7 @@ State compaction MUST NOT refund or recreate Session credit.
 
 ## TCP binding security
 
-The Draft 10 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+The Draft 11 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
 
 Every TCP Carrier performs the full MPX authentication handshake.
 

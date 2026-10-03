@@ -1,12 +1,12 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 10",
+  "revision": "Draft 11",
   "document": "COMPATIBILITY.md",
   "protocol_version": 4,
   "cases": [
     {
       "name": "draft-revision-not-on-wire",
-      "draft_revision": "Draft 10",
+      "draft_revision": "Draft 11",
       "connection_preface_version": 4,
       "expected": "draft_revision_not_encoded"
     },
@@ -120,6 +120,18 @@
       "client_accepted_server_init": true,
       "message": "VERSION_NEGOTIATION",
       "expected": "reject_candidate_no_downgrade"
+    },
+    {
+      "name": "permitted-fallback-not-highest-proof",
+      "locally_enabled_versions": [
+        5,
+        4
+      ],
+      "minimum_acceptable_version": 4,
+      "unauthenticated_version_negotiation_list": [
+        4
+      ],
+      "expected": "policy_permits_but_no_authenticated_highest_version_proof"
     }
   ]
 }
