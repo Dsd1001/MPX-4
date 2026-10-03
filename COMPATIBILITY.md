@@ -1,7 +1,7 @@
 # MPX/4 Versioning and Compatibility
 
 **Document:** MPX/4 Versioning and Compatibility
-**Revision:** Draft 09
+**Revision:** Draft 10
 **Protocol Version:** 4
 **Status:** Normative Working Draft
 

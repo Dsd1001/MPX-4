@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "document": "SPECIFICATION.md / STATE-MACHINES.md",
   "cases": [
     {
@@ -114,6 +114,27 @@
       "carrier_b": "established_same_session_limit",
       "carrier_a_event": "lost",
       "expected": "same_frame_may_reinject_on_carrier_b"
+    },
+    {
+      "name": "fin-supersession-retirement",
+      "events": [
+        "OPEN_tx1_settled",
+        "FIN_tx2_attempt_on_carrier_A_lost_before_peer_processing",
+        "peer_STOP_SENDING_on_carrier_B",
+        "sender_create_RESET_tx3_same_final",
+        "peer_process_RESET_tx3_and_ACK",
+        "sender_continue_FIN_tx2_reinjection",
+        "peer_receive_late_FIN_tx2_same_final_and_ACK",
+        "sender_settle_FIN_tx2",
+        "sender_compute_contiguous_settled_prefix_3",
+        "sender_send_TRANSMISSION_RETIRE_3"
+      ],
+      "expected": [
+        "FIN_tx2_remains_reliable_after_RESET_tx3",
+        "late_FIN_same_final_is_ACKed_without_restoring_graceful_EOF",
+        "settled_through_advances_to_3",
+        "TRANSMISSION_RETIRE_3_is_valid"
+      ]
     }
   ]
 }

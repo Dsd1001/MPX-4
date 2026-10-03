@@ -1,8 +1,8 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "binding": "TCP",
-  "purpose": "Byte-stream framing and transport-loss conformance generated from the canonical Draft 09 handshake and Secure Record fixtures",
+  "purpose": "Byte-stream framing and transport-loss conformance generated from the canonical Draft 10 handshake and Secure Record fixtures",
   "source_fixtures": {
     "handshake": "key-schedule.json",
     "secure_records": "secure-record.json"

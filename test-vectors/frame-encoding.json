@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "representation": "decrypted Frame bytes before Secure Record encryption",
   "vectors": [
     {
@@ -63,6 +63,91 @@
         "retired_through": "7"
       },
       "hex": "1a0107",
+      "length": 3
+    },
+    {
+      "name": "stream-open",
+      "frame_type": "STREAM_OPEN",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "1"
+      },
+      "hex": "10020101",
+      "length": 4
+    },
+    {
+      "name": "stream-open-ok",
+      "frame_type": "STREAM_OPEN_OK",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "1"
+      },
+      "hex": "11020101",
+      "length": 4
+    },
+    {
+      "name": "stream-open-reject",
+      "frame_type": "STREAM_OPEN_REJECT",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "1",
+        "error_code": "8"
+      },
+      "hex": "1203010108",
+      "length": 5
+    },
+    {
+      "name": "stream-fin",
+      "frame_type": "STREAM_FIN",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "2",
+        "final_offset": "10"
+      },
+      "hex": "160301020a",
+      "length": 5
+    },
+    {
+      "name": "reset-stream",
+      "frame_type": "RESET_STREAM",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "3",
+        "final_offset": "10",
+        "error_code": "14"
+      },
+      "hex": "170401030a0e",
+      "length": 6
+    },
+    {
+      "name": "stop-sending",
+      "frame_type": "STOP_SENDING",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "4",
+        "error_code": "14"
+      },
+      "hex": "180301040e",
+      "length": 5
+    },
+    {
+      "name": "stream-consumed",
+      "frame_type": "STREAM_CONSUMED",
+      "fields": {
+        "stream_id": "1",
+        "transmission_id": "5",
+        "final_offset": "10"
+      },
+      "hex": "190301050a",
+      "length": 5
+    },
+    {
+      "name": "ping",
+      "frame_type": "PING",
+      "fields": {
+        "token": "1"
+      },
+      "hex": "010101",
       "length": 3
     }
   ]

@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "document": "ERROR-HANDLING.md",
   "cases": [
     {
@@ -149,6 +149,13 @@
     },
     {
       "name": "transmission-retire-beyond-processed-prefix",
+      "context": "ESTABLISHED_SESSION",
+      "error": "TRANSMISSION_ID_ERROR",
+      "expected_scope": "session",
+      "expected_action": "SESSION_CLOSE"
+    },
+    {
+      "name": "wrong-confirmation-type",
       "context": "ESTABLISHED_SESSION",
       "error": "TRANSMISSION_ID_ERROR",
       "expected_scope": "session",

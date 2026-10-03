@@ -4,6 +4,40 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
+## Draft 10 — 2026-10-04
+
+Draft 10 closes the remaining Draft 09 reliability-prefix and confirmation-validation gaps and hardens repository validation so that reported PASS results execute the claimed positive, negative, wire, and state checks.
+
+### FIN / RESET reliability closure
+
+- RESET_STREAM created in response to STOP_SENDING supersedes an outstanding STREAM_FIN only for application-visible termination semantics.
+- The original FIN remains an outstanding reliable Transmission and continues retransmission/reinjection with its original Transmission ID until its own TRANSMISSION_ACK arrives.
+- A peer that already processed RESET acknowledges a later FIN with the same Final Offset without restoring graceful EOF.
+- This fills otherwise permanent holes in the Session-wide contiguous Settled Through prefix and makes subsequent TRANSMISSION_RETIRE watermarks valid without a separate skip/supersession wire mechanism.
+
+### Confirmation-class validation
+
+- Each reliable Transmission retains its original Frame type and required confirmation class.
+- STREAM_OPEN is settled only by STREAM_OPEN_OK or STREAM_OPEN_REJECT.
+- TRANSMISSION_ACK for STREAM_OPEN, or an opening decision that references another Frame type, Stream, or never-allocated Transmission, is TRANSMISSION_ID_ERROR.
+- Added `confirmation-validity.json` and explicit state/error-scope negative cases.
+
+### Final-size errors
+
+- Core wording now consistently classifies a conflicting established final size or DATA beyond final size as FINAL_SIZE_ERROR.
+
+### Validator hardening
+
+- VarInt validation now requires and executes all `vectors` and `invalid` cases; missing or empty schemas fail closed.
+- Frame vectors are fully re-encoded from declared fields, checked against Registry assignments and wire bytes, then decoded back to fields.
+- Secure Record validation now verifies flags, length VarInt, AAD, sequence representation, nonce, ciphertext, authentication tag, complete wire bytes, and decryption.
+- Review-driven cases now run small state oracles for credit reordering, pre-open cancellation, ACK-loss retirement, FIN/RESET supersession, and confirmation class.
+- Added `tools/mutation_test.py`; CI deliberately corrupts VarInt, Frame, state, and Secure Record fixtures and requires every corruption to make validation fail.
+
+### Compatibility
+
+Draft 10 retains Protocol Version 4 and makes no new wire assignment relative to Draft 09. The successful handshake, cryptographic vectors, Frame encodings already defined in Draft 09, and TRANSMISSION_RETIRE wire format remain unchanged. Draft 10 is wire-compatible with Draft 09 but intentionally changes edge-case reliability/error semantics before Version 4 stability.
+
 ## Draft 09 — 2026-10-04
 
 Draft 09 closes cross-Carrier reordering, cancellation, reliable-state retirement, record-size failover, version-negotiation pipelining, and executable conformance gaps identified during Draft 07 review and revalidated against Draft 08.

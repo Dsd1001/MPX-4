@@ -108,5 +108,6 @@ Before submitting a protocol change, run:
 
     python tools/generate_tcp_fixtures.py --check
     python tools/validate.py
+    python tools/mutation_test.py
 
 Changes that alter canonical handshake or Secure Record fixtures MUST regenerate dependent TCP binding fixtures with `python tools/generate_tcp_fixtures.py`. JSON protocol integers above the JavaScript safe-integer range MUST be encoded as decimal strings.

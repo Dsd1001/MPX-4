@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 09
+**Revision:** Draft 10
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -89,7 +89,7 @@ While DORMANT:
 
 When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
 
-DORMANT retention duration is local policy. Draft 09 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+DORMANT retention duration is local policy. Draft 10 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
 
 The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
 
@@ -350,7 +350,7 @@ While in ordinary OPENING, the Client MUST tolerate the following inbound Frames
 - RESET_STREAM with Final Offset 0, except when Section 7 classifies it as a response to local pre-open cancellation;
 - STOP_SENDING.
 
-Draft 09 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 10 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -422,7 +422,9 @@ After FIN_PENDING or RESET_PENDING begins, no new STREAM_DATA may be committed i
 
 Retransmitted copies of the same terminal Frame retain the same Transmission ID.
 
-If STOP_SENDING is received while FIN is pending, the sender MUST stop scheduling new Attempts of the FIN Transmission and create a new RESET_STREAM Transmission with the same Final Offset and the STOP_SENDING Error Code. The RESET_STREAM supersedes the FIN for application-visible termination. A later acknowledgement of the superseded FIN is treated as a stale settled acknowledgement and MUST NOT settle or cancel the RESET_STREAM Transmission.
+If STOP_SENDING is received while FIN is pending, the sender MUST create a new RESET_STREAM Transmission with the same Final Offset and the STOP_SENDING Error Code. The RESET_STREAM supersedes the FIN only for application-visible termination. The original FIN remains an outstanding reliable Transmission until its required TRANSMISSION_ACK is received. The sender MUST continue retransmission or reinjection Attempts of that same FIN Transmission as needed while an eligible Carrier exists, retaining the original Transmission ID and Frame contents.
+
+If the peer has already processed the RESET_STREAM, a later STREAM_FIN with the same Final Offset is acknowledged normally but MUST NOT replace reset semantics with graceful EOF. The FIN acknowledgement settles only the FIN Transmission and MUST NOT settle or cancel the RESET_STREAM Transmission.
 
 ### 8.2. Receive direction
 
@@ -507,12 +509,15 @@ Transmission IDs are Session-wide and allocated consecutively beginning at 1 wit
 
 On receiving TRANSMISSION_ACK:
 
-1. if the Transmission ID identifies an outstanding local reliable Transmission, the acknowledgement settles it;
-2. if it identifies a previously settled local Transmission, the acknowledgement is a harmless duplicate and is ignored;
-3. if it is greater than or equal to the next Transmission ID the local endpoint has not yet allocated, it is TRANSMISSION_ID_ERROR;
-4. if implementation state has compacted an older settled Transmission, the acknowledgement is treated as a stale duplicate.
+1. resolve the referenced local Transmission ID and its original Frame type;
+2. if that Frame type does not use TRANSMISSION_ACK as its required confirmation, including STREAM_OPEN, the Session fails with TRANSMISSION_ID_ERROR;
+3. the Stream ID carried by TRANSMISSION_ACK MUST match the Stream ID of the referenced Transmission, otherwise the Session fails with TRANSMISSION_ID_ERROR;
+4. if the Transmission is outstanding, the acknowledgement settles it;
+5. if it was previously settled, the acknowledgement is a harmless duplicate and is ignored;
+6. if the Transmission ID is greater than or equal to the next ID the local endpoint has not yet allocated, it is TRANSMISSION_ID_ERROR;
+7. if implementation state has safely compacted an older settled Transmission while retaining enough confirmation-class metadata to recognize stale ACKs, the acknowledgement is treated as a stale duplicate.
 
-The Stream ID carried by TRANSMISSION_ACK MUST match the Stream ID of the referenced Transmission. A mismatch is TRANSMISSION_ID_ERROR.
+On receiving STREAM_OPEN_OK or STREAM_OPEN_REJECT, the referenced Transmission ID MUST identify a local STREAM_OPEN for the same Stream ID. A reference to another Frame type, another Stream, or a never-allocated Transmission ID is TRANSMISSION_ID_ERROR. A duplicate matching the already-recorded opening decision is idempotent; a conflicting opening decision is STREAM_STATE_ERROR.
 
 ### 12.1. Transmission-ID exhaustion
 
@@ -629,7 +634,7 @@ The endpoint MUST retain enough information for the Session lifetime to prevent 
 
 ### 18.1. Stream-ID exhaustion
 
-For the Draft 09 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
+For the Draft 10 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
 
 After the Client allocates Stream ID 2^62 - 1, no additional Stream can be created in that Session. Existing Streams and Session state remain valid. A later local request to create a Stream is rejected locally unless the implementation chooses to close the Session with RESOURCE_LIMIT.
 
@@ -679,7 +684,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 09 implementation MUST:
+A conforming Draft 10 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;

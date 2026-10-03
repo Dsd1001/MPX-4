@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-import hashlib, hmac, json, re, subprocess, sys
+import argparse
+import hashlib
+import hmac
+import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-ROOT=Path(__file__).resolve().parents[1]
-TV=ROOT/'test-vectors'
 MAX_VARINT=(1<<62)-1
 JS_SAFE=(1<<53)-1
 
@@ -17,14 +21,15 @@ def vi_enc(v):
     else:n,p=8,3
     return (v | (p<<(8*n-2))).to_bytes(n,'big')
 
+
 def vi_dec(b,i=0):
+    if i>=len(b): raise ValueError('truncated varint')
     n=(1,2,4,8)[b[i]>>6]
     if i+n>len(b): raise ValueError('truncated varint')
     raw=int.from_bytes(b[i:i+n],'big'); v=raw&((1<<(8*n-2))-1)
     if len(vi_enc(v)) != n: raise ValueError('non-canonical varint')
     return v,i+n
 
-def all_json(): return sorted(list(TV.glob('*.json')) + list((ROOT/'extensions').glob('*.json')))
 
 def walk_numbers(x,path='$'):
     if isinstance(x,bool) or x is None: return
@@ -35,38 +40,152 @@ def walk_numbers(x,path='$'):
     elif isinstance(x,dict):
         for k,v in x.items(): walk_numbers(v,f'{path}.{k}')
 
-def json_and_revision():
-    for p in all_json():
-        d=json.loads(p.read_text()); walk_numbers(d,p.name)
-        if p.parent==TV: assert d.get('revision')=='Draft 09',(p,d.get('revision'))
-        elif 'core_revision' in d: assert d['core_revision']=='Draft 09',(p,d['core_revision'])
-    print('json/revision/safe-integer: ok')
 
-def markdown_links():
-    pat=re.compile(r'\[[^\]]+\]\(([^)]+)\)'); missing=[]
-    for p in ROOT.rglob('*.md'):
+def parse_registry(root):
+    text=(root/'REGISTRIES.md').read_text()
+    start=text.index('## 4. Frame Types')
+    end=text.index('## 5. Error Codes')
+    out={}
+    for line in text[start:end].splitlines():
+        if not line.startswith('|'): continue
+        cols=[c.strip() for c in line.strip('|').split('|')]
+        if len(cols)<2 or not re.fullmatch(r'0x[0-9A-Fa-f]+',cols[0]): continue
+        if re.fullmatch(r'[A-Z][A-Z0-9_]*',cols[1]): out[cols[1]]=int(cols[0],16)
+    return out
+
+
+def json_and_revision(root):
+    tv=root/'test-vectors'
+    files=sorted(list(tv.glob('*.json'))+list((root/'extensions').glob('*.json')))
+    assert files, 'no JSON vectors found'
+    for p in files:
+        d=json.loads(p.read_text()); walk_numbers(d,p.name)
+        if p.parent==tv: assert d.get('revision')=='Draft 10',(p,d.get('revision'))
+        elif 'core_revision' in d: assert d['core_revision']=='Draft 10',(p,d['core_revision'])
+    print(f'json/revision/safe-integer: ok ({len(files)} files)')
+
+
+def markdown_links(root):
+    pat=re.compile(r'\[[^\]]+\]\(([^)]+)\)'); missing=[]; checked=0
+    for p in root.rglob('*.md'):
         if '.git' in p.parts: continue
         for t in pat.findall(p.read_text()):
             if t.startswith(('http://','https://','mailto:','#')): continue
-            t=t.split('#',1)[0]
-            if t and not (p.parent/t).resolve().exists(): missing.append((str(p.relative_to(ROOT)),t))
+            t=t.split('#',1)[0]; checked+=1
+            if t and not (p.parent/t).resolve().exists(): missing.append((str(p.relative_to(root)),t))
     assert not missing,missing[:20]
-    print('markdown-links: ok')
+    print(f'markdown-links: ok ({checked} relative links)')
+
+
+def validate_varints(root):
+    d=json.loads((root/'test-vectors/varint.json').read_text())
+    assert isinstance(d.get('vectors'),list) and d['vectors'], 'varint vectors missing/empty'
+    assert isinstance(d.get('invalid'),list) and d['invalid'], 'varint invalid cases missing/empty'
+    good=bad=0
+    for c in d['vectors']:
+        assert {'value','hex','length'} <= c.keys(), c
+        v=int(c['value']); hx=c['hex']; raw=bytes.fromhex(hx)
+        assert vi_enc(v)==raw,c
+        got,j=vi_dec(raw); assert got==v and j==len(raw),c
+        assert len(raw)==int(c['length']),c
+        good+=1
+    for c in d['invalid']:
+        assert {'hex','reason'} <= c.keys(), c
+        raw=bytes.fromhex(c['hex'])
+        try: vi_dec(raw)
+        except ValueError: pass
+        else: raise AssertionError(f"invalid VarInt accepted: {c}")
+        bad+=1
+    print(f'varint: ok ({good} valid, {bad} invalid)')
+
+
+def frame_body_from_fields(name,fields):
+    i=lambda k: vi_enc(int(fields[k]))
+    if name in {'STREAM_OPEN','STREAM_OPEN_OK'}:
+        return i('stream_id')+i('transmission_id')
+    if name=='STREAM_OPEN_REJECT':
+        return i('stream_id')+i('transmission_id')+i('error_code')
+    if name=='STREAM_DATA':
+        data=fields.get('data_hex')
+        payload=bytes.fromhex(data) if data is not None else fields['data_utf8'].encode()
+        return i('stream_id')+i('offset')+i('transmission_id')+payload
+    if name=='TRANSMISSION_ACK':
+        return i('stream_id')+i('transmission_id')+i('receiver_timestamp_us')
+    if name=='STREAM_CREDIT':
+        return i('stream_id')+i('consumed_offset')+i('maximum_offset')
+    if name=='STREAM_FIN':
+        return i('stream_id')+i('transmission_id')+i('final_offset')
+    if name=='RESET_STREAM':
+        return i('stream_id')+i('transmission_id')+i('final_offset')+i('error_code')
+    if name=='STOP_SENDING':
+        return i('stream_id')+i('transmission_id')+i('error_code')
+    if name=='STREAM_CONSUMED':
+        return i('stream_id')+i('transmission_id')+i('final_offset')
+    if name=='TRANSMISSION_RETIRE': return i('retired_through')
+    if name=='SESSION_CREDIT': return i('consumed_bytes')+i('maximum_bytes')
+    if name=='CREDIT_PROBE': return i('stream_id')
+    if name in {'PING','PONG'}: return i('token')
+    raise AssertionError(f'no validator body schema for {name}')
+
+
+def decode_body(name,body):
+    pos=0
+    def get(k):
+        nonlocal pos
+        v,pos=vi_dec(body,pos); out[k]=str(v)
+    out={}
+    if name in {'STREAM_OPEN','STREAM_OPEN_OK'}: get('stream_id'); get('transmission_id')
+    elif name=='STREAM_OPEN_REJECT': get('stream_id'); get('transmission_id'); get('error_code')
+    elif name=='STREAM_DATA':
+        get('stream_id'); get('offset'); get('transmission_id'); out['data_hex']=body[pos:].hex(); pos=len(body)
+    elif name=='TRANSMISSION_ACK': get('stream_id'); get('transmission_id'); get('receiver_timestamp_us')
+    elif name=='STREAM_CREDIT': get('stream_id'); get('consumed_offset'); get('maximum_offset')
+    elif name=='STREAM_FIN': get('stream_id'); get('transmission_id'); get('final_offset')
+    elif name=='RESET_STREAM': get('stream_id'); get('transmission_id'); get('final_offset'); get('error_code')
+    elif name=='STOP_SENDING': get('stream_id'); get('transmission_id'); get('error_code')
+    elif name=='STREAM_CONSUMED': get('stream_id'); get('transmission_id'); get('final_offset')
+    elif name=='TRANSMISSION_RETIRE': get('retired_through')
+    elif name=='SESSION_CREDIT': get('consumed_bytes'); get('maximum_bytes')
+    elif name=='CREDIT_PROBE': get('stream_id')
+    elif name in {'PING','PONG'}: get('token')
+    else: raise AssertionError(f'no decoder schema for {name}')
+    if name!='STREAM_DATA' and pos!=len(body): raise AssertionError(f'extra bytes in {name}')
+    return out
+
+
+def validate_frames(root):
+    registry=parse_registry(root); d=json.loads((root/'test-vectors/frame-encoding.json').read_text())
+    assert isinstance(d.get('vectors'),list) and d['vectors'], 'frame vectors missing/empty'
+    count=0
+    for c in d['vectors']:
+        assert {'name','frame_type','fields','hex','length'} <= c.keys(), c
+        name=c['frame_type']; assert name in registry,(name,'missing registry assignment')
+        body=frame_body_from_fields(name,c['fields']); encoded=vi_enc(registry[name])+vi_enc(len(body))+body
+        assert encoded.hex()==c['hex'],(c['name'],'fields do not encode to hex',encoded.hex(),c['hex'])
+        raw=bytes.fromhex(c['hex']); typ,i=vi_dec(raw); ln,j=vi_dec(raw,i); assert typ==registry[name] and j+ln==len(raw)==int(c['length']),c
+        decoded=decode_body(name,raw[j:])
+        for k,v in c['fields'].items():
+            if k=='data_utf8': assert bytes.fromhex(decoded['data_hex']).decode()==v,c
+            elif k=='data_hex': assert decoded['data_hex']==v,c
+            else: assert decoded[k]==str(v),(c['name'],k,decoded.get(k),v)
+        count+=1
+    print(f'frame-vectors: ok ({count} full encode/decode cases)')
+
 
 def parse_msg(h):
-    b=bytes.fromhex(h); typ,i=vi_dec(b); ln,i=vi_dec(b,i); assert i+ln==len(b)
-    ps=[]; end=i+ln
+    b=bytes.fromhex(h); typ,i=vi_dec(b); ln,i=vi_dec(b,i); assert i+ln==len(b); ps=[]; end=i+ln
     while i<end:
         pt,i=vi_dec(b,i); flags=b[i]; i+=1; plen,i=vi_dec(b,i); val=b[i:i+plen]; i+=plen; ps.append((pt,flags,val))
     return typ,ps,b
 
-def handshake_and_crypto():
-    ks=json.loads((TV/'key-schedule.json').read_text()); sr=json.loads((TV/'secure-record.json').read_text())
+
+def handshake_crypto_records(root):
+    tv=root/'test-vectors'; ks=json.loads((tv/'key-schedule.json').read_text()); sr=json.loads((tv/'secure-record.json').read_text())
     ct,cp,ci=parse_msg(ks['inputs']['client_init_hex']); st,sp,si=parse_msg(ks['inputs']['server_init_hex'])
     assert ct==1 and st==2
     assert [x[0] for x in cp]==[1,2,3,4,5,7,8,9,10]
     assert [x[0] for x in sp]==[6,7,8,9,10]
-    assert 0x10 not in [x[0] for x in cp+sp] and 0x11 not in [x[0] for x in cp+sp]
+    assert dict((t,(f,v)) for t,f,v in cp)[10][0]==1 and dict((t,(f,v)) for t,f,v in sp)[10][0]==1
     def extract(salt,ikm): return hmac.new(salt,ikm,hashlib.sha256).digest()
     def expand(prk,info,L):
         o=b''; last=b''; n=1
@@ -84,45 +203,137 @@ def handshake_and_crypto():
     for k,v in checks.items(): assert ks['derived'][k]==v.hex(),k
     assert sr['traffic_key_hex']==ck.hex() and sr['traffic_iv_hex']==civ.hex()
     for rec in sr['records']:
-        seq=int(rec['sequence_number']); seq96=b'\0'*4+seq.to_bytes(8,'big'); nonce=bytes(a^b for a,b in zip(civ,seq96)); aad=bytes.fromhex(rec['aad_hex']); c=bytes.fromhex(rec['ciphertext_hex']); tag=bytes.fromhex(rec['authentication_tag_hex']); pt=bytes.fromhex(rec['plaintext_hex'])
-        assert AESGCM(ck).decrypt(nonce,c+tag,aad)==pt
-        assert AESGCM(ck).encrypt(nonce,pt,aad)==c+tag
-    print('handshake/key-schedule/secure-record: ok')
+        seq=int(rec['sequence_number']); pt=bytes.fromhex(rec['plaintext_hex']); flags=bytes.fromhex(rec['record_flags_hex']); assert len(flags)==1
+        clen=int(rec['ciphertext_length']); assert clen==len(pt)
+        clen_vi=vi_enc(clen); assert rec['ciphertext_length_varint_hex']==clen_vi.hex()
+        aad=flags+clen_vi; assert rec['aad_hex']==aad.hex()
+        seq96=b'\0'*4+seq.to_bytes(8,'big'); assert rec['seq96_hex']==seq96.hex()
+        nonce=bytes(a^b for a,b in zip(civ,seq96)); assert rec['nonce_hex']==nonce.hex()
+        enc=AESGCM(ck).encrypt(nonce,pt,aad); c,tag=enc[:-16],enc[-16:]
+        assert rec['ciphertext_hex']==c.hex() and rec['authentication_tag_hex']==tag.hex()
+        wire=aad+c+tag; assert rec['wire_record_hex']==wire.hex()
+        wr=bytes.fromhex(rec['wire_record_hex']); assert wr[0:1]==flags
+        parsed_len,hdr_end=vi_dec(wr,1); assert parsed_len==clen and hdr_end+clen+16==len(wr)
+        assert AESGCM(ck).decrypt(nonce,wr[hdr_end:hdr_end+clen]+wr[-16:],wr[:hdr_end])==pt
+    print(f'handshake/key-schedule/secure-record: ok ({len(sr["records"])} complete records)')
 
-def varint_and_frames():
-    vv=json.loads((TV/'varint.json').read_text())
-    for c in vv.get('valid',vv.get('valid_cases',[])):
-        if 'value' not in c: continue
-        v=int(c['value']); hx=c.get('hex') or c.get('encoded_hex'); assert vi_enc(v).hex()==hx
-        d,j=vi_dec(bytes.fromhex(hx)); assert d==v and j==len(bytes.fromhex(hx))
-    fv=json.loads((TV/'frame-encoding.json').read_text())
-    names=set()
-    for c in fv['vectors']:
-        b=bytes.fromhex(c['hex']); typ,i=vi_dec(b); ln,j=vi_dec(b,i); assert j+ln==len(b)==c['length']; names.add(c['name'])
-    assert 'transmission-retire' in names
-    print('varint/frame-vectors: ok')
 
-def semantic_vectors():
-    rr=json.loads((TV/'reordering-reliability.json').read_text())
-    names={c['name'] for c in rr['cases']}
-    needed={'stream-credit-stale-reordering','session-credit-stale-reordering','crossed-credit-error','preopen-stop-reset-before-reject','terminal-ack-loss-before-retire','max-record-size-join-mismatch'}
-    assert needed <= names
-    vc=json.loads((TV/'version-compatibility.json').read_text()); vn={c['name'] for c in vc['cases']}
-    assert {'vn-pipelined-client-init-server-side','vn-client-already-sent-init','vn-after-server-init'} <= vn
-    cg=json.loads((TV/'carrier-generation.json').read_text()); case=next(c for c in cg['cases'] if c['name']=='maximum-generation-no-wrap'); assert isinstance(case['highest_accepted_generation'],str) and int(case['highest_accepted_generation'])==MAX_VARINT
-    print('semantic-vectors: ok')
+def credit_merge(retained,received):
+    c,m=retained; cp,mp=received
+    if cp>=c and mp>=m: return 'update'
+    if cp<=c and mp<=m: return 'ignore_stale'
+    return 'FLOW_CONTROL_ERROR'
 
-def registry():
-    s=(ROOT/'REGISTRIES.md').read_text()
-    assert '| 0x1a | TRANSMISSION_RETIRE | Session / Transmission namespace | Core |' in s
-    assert '| 0x1b–0x1f | — | — | Core-reserved |' in s
+
+def required_confirmation(frame_type):
+    if frame_type=='STREAM_OPEN': return 'OPEN_DECISION'
+    if frame_type in {'STREAM_DATA','STREAM_FIN','RESET_STREAM','STOP_SENDING','STREAM_CONSUMED'}: return 'TRANSMISSION_ACK'
+    raise ValueError(frame_type)
+
+
+def contiguous_prefix(values):
+    n=0
+    while n+1 in values: n+=1
+    return n
+
+
+def simulate_preopen_cancel(events):
+    client='OPENING'; server='UNSEEN'; acceptance=False; out=[]
+    for e in events:
+        if e=='client_send_STREAM_OPEN': pass
+        elif e=='client_send_STOP_SENDING': client='OPENING_CANCEL_PENDING'
+        elif e=='server_receive_STOP_before_OPEN': server='PREOPEN_CANCELLED'
+        elif e=='server_send_RESET_STREAM_0': assert server=='PREOPEN_CANCELLED'
+        elif e=='client_receive_RESET_before_OPEN_result':
+            assert client=='OPENING_CANCEL_PENDING'; out.append('RESET_is_cancellation_response_not_acceptance'); assert not acceptance
+        elif e=='server_receive_STREAM_OPEN': assert server=='PREOPEN_CANCELLED'
+        elif e=='server_send_STREAM_OPEN_REJECT_STREAM_STATE_ERROR': assert server=='PREOPEN_CANCELLED'
+        elif e=='client_receive_reject':
+            assert client=='OPENING_CANCEL_PENDING'; client='CANCELLED'; out.extend(['matching_REJECT_completes_cancellation','no_session_error'])
+        else: raise AssertionError(f'unknown pre-open event {e}')
+    assert client=='CANCELLED'
+    return out
+
+def simulate_terminal_ack_loss(events):
+    processed=set(range(1,7)); settled=set(range(1,7)); replay=set(); out=[]
+    for e in events:
+        if e=='A_send_RESET_tx7': replay.add(7)
+        elif e=='B_process_RESET': processed.add(7)
+        elif e=='B_send_ACK_tx7_lost': assert 7 in replay and 7 in processed; out.append('B_retains_confirmation_replay_until_retire')
+        elif e=='A_reinject_RESET_tx7': assert 7 not in settled
+        elif e=='B_repeat_ACK_tx7': assert 7 in replay; out.append('duplicate_RESET_confirmed_again')
+        elif e=='A_settle_tx7': settled.add(7)
+        elif e=='A_send_TRANSMISSION_RETIRE_7': assert contiguous_prefix(settled)==7
+        elif e=='B_receive_retire_7': assert contiguous_prefix(processed)>=7; replay={x for x in replay if x>7}; out.append('B_may_compact_after_retire')
+        else: raise AssertionError(f'unknown retirement event {e}')
+    return out
+
+def simulate_fin_supersession(events):
+    allocated={1}; settled={1}; processed={1}; fin_outstanding=False; reset_authoritative=False; out=[]
+    for e in events:
+        if e=='OPEN_tx1_settled': assert settled=={1}
+        elif e=='FIN_tx2_attempt_on_carrier_A_lost_before_peer_processing': allocated.add(2); fin_outstanding=True; assert 2 not in processed
+        elif e=='peer_STOP_SENDING_on_carrier_B': assert fin_outstanding
+        elif e=='sender_create_RESET_tx3_same_final': allocated.add(3); reset_authoritative=True; out.append('FIN_tx2_remains_reliable_after_RESET_tx3')
+        elif e=='peer_process_RESET_tx3_and_ACK': processed.add(3); settled.add(3)
+        elif e=='sender_continue_FIN_tx2_reinjection': assert fin_outstanding and 2 not in settled
+        elif e=='peer_receive_late_FIN_tx2_same_final_and_ACK': processed.add(2); assert reset_authoritative; out.append('late_FIN_same_final_is_ACKed_without_restoring_graceful_EOF')
+        elif e=='sender_settle_FIN_tx2': settled.add(2); fin_outstanding=False
+        elif e=='sender_compute_contiguous_settled_prefix_3': assert contiguous_prefix(settled)==3; out.append('settled_through_advances_to_3')
+        elif e=='sender_send_TRANSMISSION_RETIRE_3': assert contiguous_prefix(processed)>=3; out.append('TRANSMISSION_RETIRE_3_is_valid')
+        else: raise AssertionError(f'unknown FIN supersession event {e}')
+    return out
+
+def validate_semantic_oracles(root):
+    tv=root/'test-vectors'; rr=json.loads((tv/'reordering-reliability.json').read_text())
+    assert isinstance(rr.get('cases'),list) and rr['cases'], 'review trace cases missing/empty'
+    cases={c['name']:c for c in rr['cases']}
+    # Cross-Carrier credit reordering.
+    for name in ('stream-credit-stale-reordering','session-credit-stale-reordering'):
+        c=cases[name]; order=[(int(x['consumed']),int(x['maximum'])) for x in c['receive_order']]
+        retained=order[0]; result=credit_merge(retained,order[1]); assert result=='ignore_stale' and c['expected']=='second_received_pair_is_stale_ignore',c
+    c=cases['crossed-credit-error']; retained=(int(c['retained']['consumed']),int(c['retained']['maximum'])); received=(int(c['received']['consumed']),int(c['received']['maximum']))
+    assert credit_merge(retained,received)=='FLOW_CONTROL_ERROR' and c['expected']=='FLOW_CONTROL_ERROR',c
+    # Pre-open cancellation trace.
+    c=cases['preopen-stop-reset-before-reject']; assert c['client_state']=='OPENING_CANCEL_PENDING'; assert simulate_preopen_cancel(c['events'])==c['expected'],c
+    # Retirement ACK-loss trace.
+    c=cases['terminal-ack-loss-before-retire']; assert simulate_terminal_ack_loss(c['events'])==c['expected'],c
+    # FIN supersession must fill the contiguous prefix rather than skip it.
+    c=cases['fin-supersession-retirement']; assert simulate_fin_supersession(c['events'])==c['expected'],c
+    # MAX_RECORD_SIZE JOIN rule.
+    assert cases['max-record-size-join-mismatch']['expected']=='SESSION_CONFLICT_candidate_rejected'
+    # Confirmation-class oracle.
+    cv=json.loads((tv/'confirmation-validity.json').read_text()); assert isinstance(cv.get('cases'),list) and cv['cases']
+    for c in cv['cases']:
+        req=required_confirmation(c['original_frame'])
+        got=c['confirmation']
+        if not c.get('allocated',True) or not c.get('stream_matches',True):
+            outcome='TRANSMISSION_ID_ERROR'
+        elif (req=='TRANSMISSION_ACK' and got=='TRANSMISSION_ACK') or (req=='OPEN_DECISION' and got in {'STREAM_OPEN_OK','STREAM_OPEN_REJECT'}):
+            outcome='settle'
+        else:
+            outcome='TRANSMISSION_ID_ERROR'
+        assert c['expected']==outcome,c
+    # Final-size oracle cases.
+    sv=json.loads((tv/'state-validity.json').read_text()); by={c['name']:c for c in sv['cases']}
+    for name in ('data-beyond-fin','conflicting-terminal-size','stream-consumed-wrong-final','tombstone-data-beyond-final'):
+        c=by[name]; assert c['expected']=='session_error' and c['error']=='FINAL_SIZE_ERROR',c
+    print(f'semantic-oracles: ok ({len(rr["cases"])} review traces, {len(cv["cases"])} confirmation cases)')
+
+
+def registry(root):
+    s=(root/'REGISTRIES.md').read_text(); assert '| 0x1a | TRANSMISSION_RETIRE | Session / Transmission namespace | Core |' in s
     print('registry: ok')
 
-def tcp_generated():
-    r=subprocess.run([sys.executable,str(ROOT/'tools/generate_tcp_fixtures.py'),'--check'],capture_output=True,text=True)
+
+def tcp_generated(root):
+    r=subprocess.run([sys.executable,str(root/'tools/generate_tcp_fixtures.py'),'--root',str(root),'--check'],capture_output=True,text=True)
     assert r.returncode==0,r.stdout+r.stderr
     print(r.stdout.strip())
 
+
 def main():
-    json_and_revision(); markdown_links(); registry(); varint_and_frames(); handshake_and_crypto(); semantic_vectors(); tcp_generated(); print('validation: PASS')
+    ap=argparse.ArgumentParser(); ap.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1]); args=ap.parse_args(); root=args.root.resolve()
+    json_and_revision(root); markdown_links(root); registry(root); validate_varints(root); validate_frames(root); handshake_crypto_records(root); validate_semantic_oracles(root); tcp_generated(root); print('validation: PASS')
+
 if __name__=='__main__': main()

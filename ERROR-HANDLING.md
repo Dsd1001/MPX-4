@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 09
+**Revision:** Draft 10
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -151,6 +151,7 @@ For example:
 
 - malformed Frame encoding is FRAME_ENCODING_ERROR and Carrier-scoped;
 - a correctly encoded Frame that contradicts an established final size is FINAL_SIZE_ERROR and Session-scoped;
+- a confirmation whose type does not match the referenced reliable Transmission, such as TRANSMISSION_ACK for STREAM_OPEN, is TRANSMISSION_ID_ERROR and Session-scoped;
 - structurally valid credit that is fully stale due to cross-Carrier reordering is ignored, while a crossed credit pair in which one monotonic component rises and the other falls is FLOW_CONTROL_ERROR;
 - TRANSMISSION_RETIRE beyond the largest contiguous peer Transmission prefix already processed is TRANSMISSION_ID_ERROR.
 

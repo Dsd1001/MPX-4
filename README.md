@@ -14,7 +14,7 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 09
+**Specification revision:** Draft 10
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
@@ -50,7 +50,7 @@ It provides:
 
 The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when an outstanding Transmission is retransmitted or reinjected across different Carriers.
 
-Draft 09 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
+Draft 10 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
 
 ## Interoperability material
 
@@ -78,6 +78,7 @@ Draft 09 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol
 - [Handshake rejection cases](test-vectors/handshake-reject.json)
 - [Identity lifecycle and exhaustion cases](test-vectors/identity-lifecycle.json)
 - [Reordering, retirement, and record-size cases](test-vectors/reordering-reliability.json)
+- [Confirmation-type validity cases](test-vectors/confirmation-validity.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
 Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, handshake rejection, identifier exhaustion, local Carrier-selection invariants, and failure scope.
@@ -104,10 +105,11 @@ Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
 ## Repository validation
 
-The repository includes executable validation for JSON safety, links, registries, canonical encodings, handshake cryptography, Secure Records, review-driven state traces, and generated TCP fixtures.
+The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, complete Secure Record metadata/wire consistency, review-driven state oracles, confirmation-type rules, and generated TCP fixtures.
 
     python tools/generate_tcp_fixtures.py --check
     python tools/validate.py
+    python tools/mutation_test.py
 
 GitHub Actions runs the same checks on pushes and pull requests. Protocol integers beyond the JavaScript safe-integer range are represented as decimal strings in JSON vectors.
 
@@ -161,10 +163,12 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── handshake-reject.json
     │   ├── identity-lifecycle.json
     │   ├── reordering-reliability.json
+    │   ├── confirmation-validity.json
     │   └── tcp-binding.json
     ├── tools/
     │   ├── generate_tcp_fixtures.py
-    │   └── validate.py
+    │   ├── validate.py
+    │   └── mutation_test.py
     └── .github/
         ├── workflows/
         │   └── validate.yml

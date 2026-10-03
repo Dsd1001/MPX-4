@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "parameter": "MAX_CARRIERS",
   "parameter_type": "0x0a",
   "critical_flag_required": true,

@@ -8,9 +8,9 @@ Current sets:
 
 - [varint.json](varint.json) — canonical MPX variable-length integer encodings and invalid inputs.
 - [frame-encoding.json](frame-encoding.json) — plaintext Frame encodings before Secure Record encryption.
-- [key-schedule.json](key-schedule.json) — Draft 09 handshake transcript, Finished values, application secrets, traffic keys, and traffic IVs.
-- [secure-record.json](secure-record.json) — Draft 09 AES-256-GCM nonce, AAD, ciphertext, tag, and complete wire Record.
-- [state-validity.json](state-validity.json) — Stream lifecycle and late-Frame conformance cases from the Draft 09 state-machine supplement.
+- [key-schedule.json](key-schedule.json) — Draft 10 handshake transcript, Finished values, application secrets, traffic keys, and traffic IVs.
+- [secure-record.json](secure-record.json) — Draft 10 AES-256-GCM nonce, AAD, ciphertext, tag, and complete wire Record.
+- [state-validity.json](state-validity.json) — Stream lifecycle and late-Frame conformance cases from the Draft 10 state-machine supplement.
 - [carrier-generation.json](carrier-generation.json) — Carrier Generation acceptance, replacement, supersession, and non-reuse cases.
 - [error-scope.json](error-scope.json) — Core Error Code scope and required STREAM_OPEN_REJECT / Carrier / Session actions.
 - [max-carriers.json](max-carriers.json) — MAX_CARRIERS Parameter encoding, bilateral negotiation, active logical Carrier accounting, slot release, and replacement-at-limit cases.
@@ -18,7 +18,8 @@ Current sets:
 - [version-compatibility.json](version-compatibility.json) — Session Protocol Version, VERSION_NEGOTIATION, downgrade, and stable-version evolution cases.
 - [handshake-reject.json](handshake-reject.json) — HANDSHAKE_REJECT encoding, allowed Core Error Codes, unauthenticated scope, and candidate-only rejection behavior.
 - [identity-lifecycle.json](identity-lifecycle.json) — Session-ID collision handling plus Stream-ID and Transmission-ID allocation/exhaustion rules.
-- [reordering-reliability.json](reordering-reliability.json) — cross-Carrier credit reordering, pre-open cancellation, Transmission retirement, and Session-scoped record-size cases.
+- [reordering-reliability.json](reordering-reliability.json) — cross-Carrier credit reordering, pre-open cancellation, FIN/RESET retirement convergence, Transmission retirement, and Session-scoped record-size cases.
+- [confirmation-validity.json](confirmation-validity.json) — required-confirmation-class, Stream/Transmission association, and wrong-confirmation negative cases.
 - [tcp-binding.json](tcp-binding.json) — generated from the canonical handshake and Secure Record fixtures; TCP fragmentation, coalescing, and mid-record transport-loss cases. — TCP fragmentation, coalescing, and mid-record transport-loss cases.
 
 Unless explicitly stated otherwise, test vectors are subordinate to the normative protocol specification. If a vector conflicts with the current specification, the specification controls and the vector must be corrected.
@@ -30,8 +31,8 @@ An implementation can validate interoperability in this order:
 1. VarInt parsing and canonical encoding.
 2. Frame encode/decode.
 3. Handshake message and Parameter encoding, including MAX_CARRIERS.
-4. Draft 09 key schedule and Finished authentication using the Draft 09 Core handshake transcript.
-5. Secure Record encryption and decryption under Draft 09 derived traffic keys.
+4. Draft 10 key schedule and Finished authentication using the Draft 10 Core handshake transcript.
+5. Secure Record encryption and decryption under Draft 10 derived traffic keys.
 6. Stream state and late-Frame validity.
 7. Carrier Generation replacement state.
 8. MAX_CARRIERS negotiation and active logical Carrier accounting.
@@ -48,3 +49,5 @@ An implementation can validate interoperability in this order:
 A failure at an earlier layer should be corrected before using later cryptographic vectors.
 
 Optional extension vectors are maintained with their defining extension. See [../extensions/capacity-hint.json](../extensions/capacity-hint.json) for the Carrier Receive Capacity Hint extension.
+
+The repository validator performs full positive/negative VarInt checks, Frame field-to-wire encode/decode checks, complete Secure Record metadata/wire reconstruction, review-driven state oracles, and confirmation-class checks. `tools/mutation_test.py` corrupts representative vectors and requires every corruption to make validation fail.

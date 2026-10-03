@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "document": "SPECIFICATION.md / STATE-MACHINES.md",
   "transmission_id_cases": [
     {

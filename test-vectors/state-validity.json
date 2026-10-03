@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 09",
+  "revision": "Draft 10",
   "document": "STATE-MACHINES.md",
   "cases": [
     {
@@ -42,7 +42,7 @@
       "frame": "STREAM_DATA",
       "expected": "session_error",
       "error": "STREAM_STATE_ERROR",
-      "notes": "Draft 09 has no implicit Stream data credit."
+      "notes": "Draft 10 has no implicit Stream data credit."
     },
     {
       "name": "zero-fin-overtakes-open-ok",
@@ -318,6 +318,60 @@
         "matches_recorded_terminal": true
       },
       "expected": "idempotent",
+      "response": "TRANSMISSION_ACK"
+    },
+    {
+      "name": "ack-stream-open-wrong-confirmation",
+      "state": "OPENING initiator",
+      "frame": "TRANSMISSION_ACK",
+      "conditions": {
+        "transmission_id": "outstanding STREAM_OPEN",
+        "stream_id": "matches"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "open-ok-wrong-frame-transmission",
+      "state": "OPENING initiator",
+      "frame": "STREAM_OPEN_OK",
+      "conditions": {
+        "transmission_id": "allocated STREAM_DATA",
+        "stream_id": "matches"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "open-reject-wrong-stream",
+      "state": "OPENING initiator",
+      "frame": "STREAM_OPEN_REJECT",
+      "conditions": {
+        "transmission_id": "original STREAM_OPEN",
+        "stream_id": "different"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "fin-superseded-by-reset-remains-reliable",
+      "state": "RESET_PENDING with superseded FIN outstanding",
+      "frame": "local reliability",
+      "conditions": {
+        "fin_ack_received": false,
+        "eligible_carrier": true
+      },
+      "expected": "continue_FIN_retransmit_or_reinject_same_txid"
+    },
+    {
+      "name": "late-fin-after-reset-same-final",
+      "state": "RESET_RECEIVED",
+      "frame": "STREAM_FIN",
+      "conditions": {
+        "final_offset": "same",
+        "transmission_id": "> peer_retired_through"
+      },
+      "expected": "acknowledge_without_changing_reset_semantics",
       "response": "TRANSMISSION_ACK"
     }
   ]

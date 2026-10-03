@@ -1,6 +1,6 @@
 # MPX/4 Retransmission and Reinjection Example
 
-This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 09.
+This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 10.
 
 ## 1. One logical Transmission
 
@@ -76,7 +76,7 @@ An acknowledgement is most useful for path measurement when:
 - the Transmission has only one Attempt; and
 - the acknowledgement returns on the same Carrier.
 
-Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 09 does not treat it as an unambiguous per-Carrier delivery-rate sample.
+Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 10 does not treat it as an unambiguous per-Carrier delivery-rate sample.
 
 ## 7. Retirement watermark
 
@@ -86,3 +86,9 @@ After the sender has received confirmations for every locally allocated reliable
       Retired Through = 7
 
 The peer may then discard confirmation-replay detail for those Transmission IDs. Before receiving that watermark, a duplicate Transmission 7 must still receive its required confirmation again. A lost retirement advertisement delays reclamation but does not change reliability state.
+
+## 8. FIN superseded by RESET
+
+Suppose STREAM_FIN uses Transmission 2 and its only Attempt is lost with Carrier A. The peer then sends STOP_SENDING over Carrier B, so the sender creates RESET_STREAM Transmission 3 with the same Final Offset. RESET becomes authoritative for application-visible termination, but Transmission 2 is still outstanding.
+
+The sender continues retransmission or reinjection of the same FIN Transmission 2 until its TRANSMISSION_ACK arrives. If the peer already processed RESET 3, it acknowledges the late FIN 2 when the Final Offset matches but keeps reset semantics authoritative. This lets Settled Through advance across 1, 2, 3 without inventing a skip in the Session-wide Transmission namespace.

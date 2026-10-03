@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 09
+**Revision:** Draft 10
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 09 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 09 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 10 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 10 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -148,7 +148,7 @@ Receipt of HANDSHAKE_REJECT does not authenticate the sender, modify an existing
 
 ### B15. HANDSHAKE_REJECT is outside successful transcript
 
-A successful Draft 09 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record baseline bytes as Draft 08. HANDSHAKE_REJECT and TRANSMISSION_RETIRE do not alter the successful handshake transcript.
+A successful Draft 10 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record baseline bytes as Draft 09. Draft 10 changes established-state reliability semantics but does not alter the successful handshake transcript.
 
 ### B16. CREATE Session-ID collision
 
@@ -269,6 +269,16 @@ Transmission ID 2^62 - 1 can be allocated once as the final reliable Transmissio
 A sends reliable Transmissions 1 through 3. B processes all three, but the confirmation for Transmission 2 is initially lost. B retains enough response state to confirm Transmission 2 again. After A receives the repeated confirmation, A's Settled Through advances to 3 and A sends TRANSMISSION_RETIRE(3). Only then may B discard confirmation-replay detail for peer Transmissions through 3.
 
 A stale lower TRANSMISSION_RETIRE is ignored. A value beyond B's largest contiguous processed peer Transmission ID is TRANSMISSION_ID_ERROR.
+
+### E8. Confirmation type must match the original Transmission
+
+A TRANSMISSION_ACK referring to an outstanding STREAM_OPEN Transmission is rejected with TRANSMISSION_ID_ERROR and does not settle the opening. STREAM_OPEN_OK and STREAM_OPEN_REJECT settle only a STREAM_OPEN with the same Stream ID and echoed Transmission ID. A confirmation referring to another Frame type, another Stream, or a never-allocated Transmission ID fails with TRANSMISSION_ID_ERROR.
+
+### E9. FIN supersession does not create a retirement gap
+
+Transmission 1 is settled. STREAM_FIN Transmission 2 is attempted on Carrier A, which fails before the peer processes it. The peer sends STOP_SENDING on Carrier B, causing the sender to allocate RESET_STREAM Transmission 3 with the same Final Offset. RESET_STREAM becomes authoritative for application-visible termination, but FIN Transmission 2 remains reliable.
+
+After the peer processes and confirms RESET_STREAM 3, the sender reinjects FIN 2. The peer, already in reset semantics, acknowledges the late FIN with the same Final Offset without restoring graceful EOF. Once FIN 2 is confirmed, the sender's Settled Through advances from 1 to 3 and TRANSMISSION_RETIRE(3) is valid.
 
 ## 9. Group F — Flow control
 
@@ -554,7 +564,7 @@ A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
     Protocol Version: 4
-    Revision: Draft 09
+    Revision: Draft 10
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -576,10 +586,10 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 09 keeps development Protocol Version 4 and preserves the Draft 08 successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and existing baseline encrypted records.
+Draft 10 keeps development Protocol Version 4 and preserves the Draft 09 wire format, registry assignments, successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and baseline encrypted records.
 
-Draft 09 adds Core Frame Type 0x1a TRANSMISSION_RETIRE. A Draft 08 peer treats this unknown Core Frame as PROTOCOL_VIOLATION, so established-session interoperability with Draft 08 is not guaranteed once a Draft 09 endpoint sends the retirement watermark. This is an explicitly documented development-line incompatibility before Version 4 stability.
+Draft 10 changes established-state semantics to close reliability ambiguities: a FIN superseded by RESET for application semantics remains a reliable Transmission until its own required acknowledgement is received; final-size contradictions consistently use FINAL_SIZE_ERROR; and every confirmation is checked against the original Transmission's required confirmation class.
 
-Draft 09 also changes peer-visible Core semantics without changing existing encodings: credit advertisements merge under cross-Carrier reordering, pre-open cancellation is distinguished from acceptance evidence, MAX_RECORD_SIZE becomes Session-scoped, and VERSION_NEGOTIATION explicitly supports Preface+CLIENT_INIT pipelining.
+Draft 09 and Draft 10 are therefore wire-compatible but are not guaranteed to behave identically in these edge cases. A Draft 09 implementation following the old FIN rule can stall the contiguous retirement watermark, and an implementation that accepts a wrong confirmation class can settle a Transmission that Draft 10 rejects.
 
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 09 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 10 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

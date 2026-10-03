@@ -18,5 +18,7 @@ jobs:
         run: python tools/generate_tcp_fixtures.py --check
       - name: Validate specification and vectors
         run: python tools/validate.py
+      - name: Mutation tests
+        run: python tools/mutation_test.py
       - name: Ensure generated files are committed
         run: git diff --exit-code

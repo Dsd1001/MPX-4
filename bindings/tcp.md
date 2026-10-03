@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 09
+**Revision:** Draft 10
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -72,7 +72,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 09 does not define or reserve a well-known TCP port.
+MPX/4 Draft 10 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -231,7 +231,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 09.
+The exact deadline is local policy and is not negotiated by Draft 10.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -408,7 +408,7 @@ Different Carriers MAY connect to different server addresses when those endpoint
 
 ## 28. Maximum sizes and TCP
 
-MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values. MAX_RECORD_SIZE is Session-scoped in Draft 09; every JOIN repeats the CREATE-time directional value, so any eligible Carrier in the Session can carry an already-created Frame that satisfied the Session limits.
+MAX_FRAME_PAYLOAD and MAX_RECORD_SIZE are MPX protocol limits, not TCP MSS or path-MTU values. MAX_RECORD_SIZE is Session-scoped in Draft 10; every JOIN repeats the CREATE-time directional value, so any eligible Carrier in the Session can carry an already-created Frame that satisfied the Session limits.
 
 An MPX Secure Record larger than one TCP segment is valid.
 

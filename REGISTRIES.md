@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 09
+**Registry Revision:** Draft 10
 
 This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
@@ -131,7 +131,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 09 |
+| 1–7 | RESERVED | MUST be zero in Draft 10 |
 
 ## 7. Registry stability
 

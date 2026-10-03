@@ -1,0 +1,95 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 10",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "open-confirmed-by-open-ok",
+      "original_frame": "STREAM_OPEN",
+      "confirmation": "STREAM_OPEN_OK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "open-confirmed-by-open-reject",
+      "original_frame": "STREAM_OPEN",
+      "confirmation": "STREAM_OPEN_REJECT",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "open-not-confirmed-by-generic-ack",
+      "original_frame": "STREAM_OPEN",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "data-confirmed-by-ack",
+      "original_frame": "STREAM_DATA",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "fin-confirmed-by-ack",
+      "original_frame": "STREAM_FIN",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "reset-confirmed-by-ack",
+      "original_frame": "RESET_STREAM",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "stop-confirmed-by-ack",
+      "original_frame": "STOP_SENDING",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "consumed-confirmed-by-ack",
+      "original_frame": "STREAM_CONSUMED",
+      "confirmation": "TRANSMISSION_ACK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "settle"
+    },
+    {
+      "name": "data-not-confirmed-by-open-ok",
+      "original_frame": "STREAM_DATA",
+      "confirmation": "STREAM_OPEN_OK",
+      "stream_matches": true,
+      "allocated": true,
+      "expected": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "open-ok-wrong-stream",
+      "original_frame": "STREAM_OPEN",
+      "confirmation": "STREAM_OPEN_OK",
+      "stream_matches": false,
+      "allocated": true,
+      "expected": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "open-reject-never-allocated",
+      "original_frame": "STREAM_OPEN",
+      "confirmation": "STREAM_OPEN_REJECT",
+      "stream_matches": true,
+      "allocated": false,
+      "expected": "TRANSMISSION_ID_ERROR"
+    }
+  ]
+}
