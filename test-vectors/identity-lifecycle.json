@@ -1,0 +1,123 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 08",
+  "document": "SPECIFICATION.md / STATE-MACHINES.md",
+  "transmission_id_cases": [
+    {
+      "name": "allocation-is-consecutive",
+      "allocated": [
+        "1",
+        "2",
+        "3"
+      ],
+      "next_transmission_id": "4",
+      "expected": "valid"
+    },
+    {
+      "name": "skip-is-forbidden",
+      "allocated": [
+        "1",
+        "2"
+      ],
+      "candidate": "4",
+      "expected": "invalid_allocation_gap"
+    },
+    {
+      "name": "final-id-allocation",
+      "next_transmission_id": "4611686018427387903",
+      "candidate": "4611686018427387903",
+      "expected": "allocate_once_then_namespace_exhausted"
+    },
+    {
+      "name": "no-wrap-after-final",
+      "last_allocated": "4611686018427387903",
+      "candidate": "1",
+      "expected": "forbidden_reuse_or_wrap"
+    },
+    {
+      "name": "retransmit-final-id",
+      "last_allocated": "4611686018427387903",
+      "outstanding_transmission_id": "4611686018427387903",
+      "expected": "retransmit_or_reinject_same_id_permitted"
+    },
+    {
+      "name": "new-reliable-after-exhaustion",
+      "last_allocated": "4611686018427387903",
+      "requires_new_reliable_transmission": true,
+      "expected": "SESSION_CLOSE_RESOURCE_LIMIT_when_possible"
+    }
+  ],
+  "stream_id_cases": [
+    {
+      "name": "odd-consecutive-space",
+      "allocated": [
+        "1",
+        "3",
+        "5"
+      ],
+      "next_stream_id": "7",
+      "expected": "valid"
+    },
+    {
+      "name": "final-stream-id",
+      "next_stream_id": "4611686018427387903",
+      "candidate": "4611686018427387903",
+      "expected": "allocate_once_then_stream_namespace_exhausted"
+    },
+    {
+      "name": "no-stream-wrap",
+      "last_allocated": "4611686018427387903",
+      "candidate": "1",
+      "expected": "forbidden_reuse_or_wrap"
+    },
+    {
+      "name": "open-after-stream-exhaustion",
+      "last_allocated": "4611686018427387903",
+      "local_open_request": true,
+      "expected": "fail_locally_no_new_stream",
+      "session_may_remain_active": true
+    }
+  ],
+  "session_id_cases": [
+    {
+      "name": "active-collision",
+      "retained_state": "ACTIVE",
+      "create_same_session_id": true,
+      "expected": "HANDSHAKE_REJECT_SESSION_CONFLICT_if_reportable",
+      "existing_session_modified": false
+    },
+    {
+      "name": "dormant-collision",
+      "retained_state": "DORMANT",
+      "create_same_session_id": true,
+      "expected": "HANDSHAKE_REJECT_SESSION_CONFLICT_if_reportable",
+      "existing_session_modified": false
+    },
+    {
+      "name": "closing-collision",
+      "retained_state": "CLOSING",
+      "create_same_session_id": true,
+      "expected": "HANDSHAKE_REJECT_SESSION_CONFLICT_if_reportable",
+      "existing_session_modified": false
+    },
+    {
+      "name": "closed-retirement-collision",
+      "retained_state": "CLOSED_retirement",
+      "create_same_session_id": true,
+      "expected": "HANDSHAKE_REJECT_SESSION_CONFLICT_if_reportable",
+      "retired_state_recreated": false
+    },
+    {
+      "name": "discarded-historical-state",
+      "retained_state": "none",
+      "random_session_id_matches_historical_unknown_value": true,
+      "expected": "normal_CREATE_processing"
+    },
+    {
+      "name": "initiator-intentional-reuse",
+      "initiator_retains_state": true,
+      "reuse_same_session_id": true,
+      "expected": "forbidden"
+    }
+  ]
+}

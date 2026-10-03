@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 07 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 07 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 08 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 08 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -136,6 +136,20 @@ A Session created under Protocol Version 4 accepts only JOIN and replacement Car
 
 VERSION_NEGOTIATION is accepted only before CLIENT_INIT. A retry uses a fresh underlying connection and does not enable a locally disabled or below-minimum Protocol Version. Authentication failure is not interpreted as permission to retry with a lower version.
 
+### B14. HANDSHAKE_REJECT encoding and scope
+
+Both implementations reproduce test-vectors/handshake-reject.json. A candidate JOIN rejected with SESSION_NOT_FOUND, SESSION_CONFLICT, CARRIER_CONFLICT, or RESOURCE_LIMIT receives HANDSHAKE_REJECT with the classified Error Code when the failure is safely reportable before SERVER_FINISHED. The candidate transport then closes.
+
+Receipt of HANDSHAKE_REJECT does not authenticate the sender, modify an existing Session, advance Carrier Generation, or trigger Protocol Version downgrade.
+
+### B15. HANDSHAKE_REJECT is outside successful transcript
+
+A successful Draft 08 CREATE reproduces the same CLIENT_INIT, SERVER_INIT, Finished, traffic-secret, key, IV, and Secure Record vector bytes as Draft 07. HANDSHAKE_REJECT appears only on a failed candidate and is never included in H0, H1, or H2 of a successful handshake.
+
+### B16. CREATE Session-ID collision
+
+A CREATE using a SESSION_ID already mapped to CREATING, ACTIVE, DORMANT, or CLOSING state, or to retained CLOSED retirement state, is rejected with SESSION_CONFLICT. The existing or retired Session is not overwritten, merged, reopened, or treated as the target of a JOIN.
+
 ## 6. Group C — Single-Carrier Stream
 
 **Mandatory.**
@@ -163,6 +177,10 @@ Both directions transfer concurrently on one Stream.
 ### C6. Multiple Streams
 
 At least 16 simultaneously active Streams carry independent data correctly.
+
+### C7. Stream-ID exhaustion
+
+The Client can allocate Stream ID 2^62 - 1 as the final odd Stream ID. A subsequent local Stream-open request does not wrap to 1 and does not reuse any retired Stream ID. Existing Streams and Session state may continue.
 
 ## 7. Group D — Multi-Carrier Session
 
@@ -237,6 +255,10 @@ The receiving Session fails with TRANSMISSION_ID_ERROR.
 A peer sends TRANSMISSION_ACK for a Transmission ID that the local endpoint has never allocated.
 
 The Session fails with TRANSMISSION_ID_ERROR.
+
+### E6. Transmission-ID exhaustion
+
+Transmission ID 2^62 - 1 can be allocated once as the final reliable Transmission ID. A subsequent need for a new reliable Transmission does not wrap or reuse an ID; the endpoint transitions the Session to CLOSING and sends SESSION_CLOSE(RESOURCE_LIMIT) when possible. Existing outstanding Transmissions may still be settled before shutdown.
 
 ## 9. Group F — Flow control
 
@@ -458,7 +480,9 @@ The endpoint returns or internally records the error class required by the speci
 The Mandatory negative suite also verifies:
 
 - STREAM_LIMIT on STREAM_OPEN produces STREAM_OPEN_REJECT and does not close the Session;
-- a rejected JOIN with CARRIER_CONFLICT does not advance Generation or modify the existing Session;
+- a rejected JOIN with CARRIER_CONFLICT does not advance Generation or modify the existing Session and uses HANDSHAKE_REJECT(CARRIER_CONFLICT) when safely reportable;
+- a colliding CREATE uses SESSION_CONFLICT and does not overwrite retained Session identity state;
+- received HANDSHAKE_REJECT never triggers Protocol Version downgrade or existing-Session mutation;
 - Secure Record authentication failure terminates only the affected Carrier;
 - FRAME_ENCODING_ERROR terminates only the affected Carrier when the error is safely reportable after establishment;
 - FLOW_CONTROL_ERROR produces Session-scoped shutdown;
@@ -506,7 +530,7 @@ A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
     Protocol Version: 4
-    Revision: Draft 07
+    Revision: Draft 08
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -528,14 +552,10 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 07 keeps development Protocol Version 4 but intentionally changes the Core handshake from Draft 06.
+Draft 08 keeps development Protocol Version 4 and preserves the successful Draft 07 Core handshake transcript, key schedule, Secure Record syntax, Frame encodings, and existing successful-path vectors.
 
-Draft 07 removes the Draft 06 Core SCHEDULER Parameter (0x10), PATH_CAPACITY Parameter (0x11), SCHEDULER_MISMATCH Error Code (0x0b), and Core Scheduler-ID registry. Their Draft 06 numeric assignments are retained as Reserved historical values and are not reused by Core.
+Draft 08 adds Core Handshake Message Type 0x06 HANDSHAKE_REJECT for pre-establishment candidate rejection. The message is used only on failed candidate handshakes and is never included in a successful Finished transcript. A Draft 07 endpoint does not understand Message Type 0x06, so failed-candidate diagnostics are not interoperable across Draft 07/08 even though the successful Draft 08 baseline handshake bytes are unchanged.
 
-Because SCHEDULER was present in every Draft 06 CREATE/JOIN handshake, removing it changes CLIENT_INIT / SERVER_INIT transcript bytes. Draft 07 therefore publishes new key-schedule and Secure Record vectors even though HKDF, HMAC, AES-GCM, Frame encodings, and Secure Record syntax are unchanged.
+Draft 08 also closes identifier-lifecycle semantics without changing identifier encodings: Transmission IDs and Stream IDs never wrap, and retained Session IDs cannot be reused by CREATE. Conflicting Transmission-ID reuse is consistently TRANSMISSION_ID_ERROR.
 
-Carrier selection in Draft 07 is endpoint-local policy. Two conforming Core peers do not negotiate scheduler modes and may use unrelated local policies for opposite sending directions.
-
-Optional capacity signaling is no longer a Core concept. The published [Carrier Receive Capacity Hint extension](extensions/capacity-hint.md) allocates extension Parameter 0x40 with CRITICAL=0. A peer that does not implement that extension can safely ignore it and still interoperate at Core.
-
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 07 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 08 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

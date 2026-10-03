@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -69,7 +69,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 07 does not define or reserve a well-known TCP port.
+MPX/4 Draft 08 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -115,6 +115,8 @@ A TCP EOF, reset, or unrecoverable read error before a complete handshake messag
 Incomplete handshake bytes are discarded.
 
 No partial handshake message changes authenticated Session state.
+
+HANDSHAKE_REJECT, when used, is one complete handshake message followed by termination of the candidate TCP connection. The receiver MUST NOT interpret the subsequent TCP close as closing an already authenticated Session. A TCP implementation MAY close without HANDSHAKE_REJECT when the Core rules permit silent candidate termination.
 
 ## 8. Transition to Secure Records
 
@@ -226,7 +228,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 07.
+The exact deadline is local policy and is not negotiated by Draft 08.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 

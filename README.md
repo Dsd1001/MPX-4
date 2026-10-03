@@ -14,7 +14,7 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 07
+**Specification revision:** Draft 08
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
@@ -50,7 +50,7 @@ It provides:
 
 The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when an outstanding Transmission is retransmitted or reinjected across different Carriers.
 
-Draft 07 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
+Draft 08 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
 
 ## Interoperability material
 
@@ -75,9 +75,11 @@ Draft 07 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol
 - [MAX_CARRIERS negotiation and active-count cases](test-vectors/max-carriers.json)
 - [Session lifecycle and DORMANT cases](test-vectors/session-lifecycle.json)
 - [Protocol Version compatibility cases](test-vectors/version-compatibility.json)
+- [Handshake rejection cases](test-vectors/handshake-reject.json)
+- [Identity lifecycle and exhaustion cases](test-vectors/identity-lifecycle.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
-Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, local Carrier-selection invariants, and failure scope.
+Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, handshake rejection, identifier exhaustion, local Carrier-selection invariants, and failure scope.
 
 ## Extension points
 
@@ -146,6 +148,8 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── max-carriers.json
     │   ├── session-lifecycle.json
     │   ├── version-compatibility.json
+    │   ├── handshake-reject.json
+    │   ├── identity-lifecycle.json
     │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/

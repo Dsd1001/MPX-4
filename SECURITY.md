@@ -6,9 +6,9 @@ This document describes security requirements and operational guidance for MPX/4
 
 Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), [ERROR-HANDLING.md](ERROR-HANDLING.md), and [COMPATIBILITY.md](COMPATIBILITY.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 07 security profile
+## Draft 08 security profile
 
-The mandatory-to-implement Draft 07 profile uses:
+The mandatory-to-implement Draft 08 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -43,7 +43,7 @@ A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 07 profile does not provide forward secrecy.
+The mandatory Draft 08 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -63,6 +63,8 @@ Implementations MUST authenticate all Parameters that influence Session behavior
 
 Parameter parsing MUST reject duplicate, out-of-order, malformed, and contradictory Core Parameters before accepting the handshake.
 
+HANDSHAKE_REJECT is deliberately outside the successful Finished transcript and is unauthenticated. Its Error Code is diagnostic only. A receiver MUST NOT treat HANDSHAKE_REJECT as peer authentication, mutate an existing Session because of it, or relax Protocol Version policy in response to it.
+
 ## Key separation
 
 Client and Server Finished keys are independently derived.
@@ -73,7 +75,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 07 uses a per-direction Record Sequence Number beginning at zero.
+Draft 08 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -81,7 +83,7 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 07 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 08 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -99,13 +101,13 @@ Implementations MUST enforce Carrier Generation rules:
 - superseded Carriers are not eligible for new Attempts or path-measurement samples;
 - Generation values never wrap.
 
-Reliable Transmission IDs are Session-wide and are never reused.
+Reliable Transmission IDs are Session-wide, allocated consecutively from 1, and are never skipped, reused, or wrapped. Stream IDs and Carrier Generations likewise never wrap within their defined spaces.
 
-Retransmission and reinjection repeat the same Transmission ID. If the same Transmission ID is observed with different semantic Frame contents, the Session is invalid.
+Retransmission and reinjection repeat the same Transmission ID. If the same Transmission ID is observed with different semantic Frame contents, the Session fails with TRANSMISSION_ID_ERROR.
 
 ## Stream-data integrity
 
-Draft 07 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 08 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -200,7 +202,7 @@ Carrier-scoped authentication, integrity, or Frame-encoding failures terminate o
 
 Session-scoped failures, including flow-control violations, final-size contradictions, and impossible Transmission identity, require a Session-wide transition to CLOSING and SESSION_CLOSE when an authenticated writable Carrier is available.
 
-A candidate JOIN failure MUST NOT mutate existing Session state, advance Carrier Generation, or supersede an authenticated Carrier.
+A candidate CREATE or JOIN failure MUST NOT mutate existing Session state, advance Carrier Generation, or supersede an authenticated Carrier. A safely reportable pre-establishment failure may use unauthenticated HANDSHAKE_REJECT, but the message does not widen failure scope.
 
 Diagnostic reason strings are non-normative and MUST NOT control protocol behavior.
 
@@ -212,13 +214,15 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 07 key derivation and Finished authentication;
-- Draft 07 Secure Record encryption;
+- Draft 08 key derivation and Finished authentication;
+- Draft 08 Secure Record encryption;
 - Stream state validity;
 - Carrier Generation replacement state;
 - MAX_CARRIERS negotiation and active Carrier accounting;
 - DORMANT Session lifecycle;
 - Protocol Version compatibility and cross-version Session isolation;
+- HANDSHAKE_REJECT encoding and unauthenticated candidate-only semantics;
+- Session-ID collision and Stream/Transmission identifier exhaustion;
 - Error Code failure scope.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
@@ -253,7 +257,7 @@ State compaction MUST NOT refund or recreate Session credit.
 
 ## TCP binding security
 
-The Draft 07 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+The Draft 08 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
 
 Every TCP Carrier performs the full MPX authentication handshake.
 

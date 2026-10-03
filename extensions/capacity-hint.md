@@ -2,7 +2,7 @@
 
 **Extension:** Carrier Receive Capacity Hint  
 **Extension Revision:** 01  
-**Applicable Core:** MPX/4 Draft 07 / Protocol Version 4 development line  
+**Applicable Core:** MPX/4 Draft 08 / Protocol Version 4 development line
 **Status:** Published Optional Extension
 
 This extension defines one optional authenticated per-Carrier capacity hint. It does not define a scheduler algorithm, scheduler mode, path topology model, Relay role, or shared scheduling policy.

@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 07 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 08 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -113,13 +113,13 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 07 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 08 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 07 derivation is defined in Section 10 of the Core specification.
+The exact Draft 08 derivation is defined in Section 10 of the Core specification.
 
 Because MAX_CARRIERS is part of CLIENT_INIT and SERVER_INIT, changing either advertisement changes the authenticated transcript and therefore changes Finished values and application traffic secrets.
 
@@ -206,7 +206,20 @@ A later valid JOIN or replacement using Protocol Version 4 can return the Sessio
 
 If local retention policy discards the DORMANT Session before reconnection, a later JOIN receives SESSION_NOT_FOUND.
 
-## Draft 07 notes
+## 9. Rejected candidate Carrier
+
+A failed CREATE, JOIN, or replacement can be rejected before establishment with HANDSHAKE_REJECT when the failure is safely reportable. For example, if a JOIN names a retained Carrier Generation conflict:
+
+    Server -> Client
+
+    HANDSHAKE_REJECT
+      Error Code = CARRIER_CONFLICT
+
+The candidate transport then closes. HANDSHAKE_REJECT is unauthenticated, does not enter the successful Finished transcript, and does not modify the existing Session.
+
+A Client receiving such a rejection does not treat it as permission to retry a lower Protocol Version.
+
+## Draft 08 notes
 
 Handshake Parameters are encoded in strictly increasing Parameter-Type order.
 

@@ -1,6 +1,6 @@
 # MPX/4 TCP Carrier Example
 
-This example illustrates the MPX/4 Draft 07 TCP binding.
+This example illustrates the MPX/4 Draft 08 TCP binding.
 
 ## 1. TCP connect
 

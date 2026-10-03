@@ -4,6 +4,43 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
+## Draft 08 — 2026-10-04
+
+Draft 08 is a Core closure / freeze-preparation revision. It does not add application features; it closes pre-establishment failure signaling and identifier-lifecycle edge cases before a future Protocol Version 4 stability review.
+
+### Added
+
+- Core Handshake Message Type `0x06` `HANDSHAKE_REJECT`.
+- Machine-readable [handshake-reject.json](test-vectors/handshake-reject.json) cases.
+- Machine-readable [identity-lifecycle.json](test-vectors/identity-lifecycle.json) cases covering Session-ID collision and Stream/Transmission exhaustion.
+
+### HANDSHAKE_REJECT
+
+- Carries exactly one Error Code VarInt and terminates only the current candidate Carrier handshake.
+- Is unauthenticated and is not part of a successful Finished transcript.
+- MUST NOT authenticate the peer, modify an existing Session, advance Carrier Generation, or trigger Protocol Version downgrade.
+- Is used only when a pre-establishment failure is classifiable and a safe response can be emitted before SERVER_FINISHED; otherwise candidate transport close remains valid.
+- Does not replace VERSION_NEGOTIATION for an unsupported Connection Preface version.
+- Core permits INTERNAL_ERROR, PROTOCOL_VIOLATION, AUTHENTICATION_FAILED, RESOURCE_LIMIT, SESSION_NOT_FOUND, SESSION_CONFLICT, CARRIER_CONFLICT, and UNSUPPORTED_PARAMETER in HANDSHAKE_REJECT.
+
+### Identifier lifecycle
+
+- Transmission IDs are now explicitly consecutive positive integers beginning at 1; gaps, reuse, and wrap are forbidden.
+- `2^62 - 1` is the final Transmission ID. If another reliable Transmission is required after exhaustion, the Session closes with RESOURCE_LIMIT when possible.
+- Client Stream IDs remain consecutive odd values and explicitly never wrap. `2^62 - 1` is the final Stream ID; further local Stream-open requests fail without requiring Session closure.
+- CREATE using a Session ID that still maps to CREATING, ACTIVE, DORMANT, CLOSING, or retained CLOSED retirement state is SESSION_CONFLICT and cannot overwrite, merge with, or reopen that state.
+- Once all state for an old Session ID has been discarded, a later random collision cannot be distinguished from a fresh ID and follows normal CREATE processing.
+
+### Corrected
+
+- Reuse of one Transmission ID with different semantic Frame contents is consistently `TRANSMISSION_ID_ERROR`. Draft 07 Core Specification text that said PROTOCOL_VIOLATION was inconsistent with the state machine, Error Handling, interoperability profile, and test vectors.
+
+### Compatibility
+
+Draft 08 keeps development Protocol Version 4. Successful CREATE/JOIN handshake bytes, H0/H1/H2, Finished values, traffic secrets, keys, IVs, Frame encodings, and Secure Record vectors are unchanged from Draft 07 except revision metadata.
+
+`HANDSHAKE_REJECT` exists only on failed candidate handshakes, so it does not alter the successful transcript. Draft 07 peers do not understand Handshake Message Type `0x06`; failed-candidate diagnostics are therefore not Draft 07/08 interoperable even though the successful baseline handshake is byte-compatible.
+
 ## Draft 07 — 2026-10-04
 
 Draft 07 is a Core-slimming revision. It removes scheduler-mode negotiation and capacity signaling from the mandatory Core protocol so that Carrier-selection policy remains local to each sending endpoint.

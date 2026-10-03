@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 07",
+  "revision": "Draft 08",
   "document": "ERROR-HANDLING.md",
   "cases": [
     {
@@ -23,7 +23,15 @@
       "context": "JOIN_HANDSHAKE",
       "error": "SESSION_NOT_FOUND",
       "expected_scope": "pre_establishment_carrier",
-      "expected_action": "reject_candidate",
+      "expected_action": "HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate",
+      "existing_session_modified": false
+    },
+    {
+      "name": "create-session-id-collision",
+      "context": "CREATE_HANDSHAKE",
+      "error": "SESSION_CONFLICT",
+      "expected_scope": "pre_establishment_carrier",
+      "expected_action": "HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate",
       "existing_session_modified": false
     },
     {
@@ -31,7 +39,7 @@
       "context": "JOIN_HANDSHAKE",
       "error": "CARRIER_CONFLICT",
       "expected_scope": "pre_establishment_carrier",
-      "expected_action": "reject_candidate",
+      "expected_action": "HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate",
       "generation_advanced": false
     },
     {
@@ -39,7 +47,7 @@
       "context": "HANDSHAKE",
       "error": "AUTHENTICATION_FAILED",
       "expected_scope": "carrier",
-      "expected_action": "terminate_carrier"
+      "expected_action": "HANDSHAKE_REJECT_if_safely_reportable_or_terminate_carrier"
     },
     {
       "name": "secure-record-authentication-failure",
@@ -106,7 +114,7 @@
       "resource_scope": "active_logical_carrier_count",
       "error": "RESOURCE_LIMIT",
       "expected_scope": "pre_establishment_carrier",
-      "expected_action": "reject_candidate",
+      "expected_action": "HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate",
       "existing_session_modified": false
     },
     {

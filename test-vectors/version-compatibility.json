@@ -1,12 +1,12 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 07",
+  "revision": "Draft 08",
   "document": "COMPATIBILITY.md",
   "protocol_version": 4,
   "cases": [
     {
       "name": "draft-revision-not-on-wire",
-      "draft_revision": "Draft 07",
+      "draft_revision": "Draft 08",
       "connection_preface_version": 4,
       "expected": "draft_revision_not_encoded"
     },
@@ -25,7 +25,10 @@
     },
     {
       "name": "supported-cross-version-join",
-      "locally_supported_versions": [5, 4],
+      "locally_supported_versions": [
+        5,
+        4
+      ],
       "session_protocol_version": 4,
       "candidate_protocol_version": 5,
       "operation": "JOIN",
@@ -35,7 +38,9 @@
     },
     {
       "name": "unsupported-preface-version",
-      "locally_supported_versions": [4],
+      "locally_supported_versions": [
+        4
+      ],
       "candidate_protocol_version": 5,
       "expected": "VERSION_NEGOTIATION_or_close",
       "session_attachment": false
@@ -54,15 +59,29 @@
     },
     {
       "name": "downgrade-does-not-enable-disabled-version",
-      "locally_enabled_versions": [4],
-      "version_negotiation_list": [5, 4, 3],
-      "expected_retry_versions": [4]
+      "locally_enabled_versions": [
+        4
+      ],
+      "version_negotiation_list": [
+        5,
+        4,
+        3
+      ],
+      "expected_retry_versions": [
+        4
+      ]
     },
     {
       "name": "downgrade-respects-minimum",
-      "locally_supported_versions": [5, 4, 3],
+      "locally_supported_versions": [
+        5,
+        4,
+        3
+      ],
       "minimum_acceptable_version": 4,
-      "version_negotiation_list": [3],
+      "version_negotiation_list": [
+        3
+      ],
       "expected": "no_retry_below_minimum"
     },
     {
@@ -82,6 +101,13 @@
       "version_state": "stable",
       "change": "new_optional_explicitly_negotiated_extension",
       "expected": "same_protocol_version_permitted"
+    },
+    {
+      "name": "handshake-reject-does-not-trigger-downgrade",
+      "attempted_protocol_version": 4,
+      "message": "HANDSHAKE_REJECT",
+      "error": "SESSION_CONFLICT",
+      "expected": "no_automatic_lower_version_retry"
     }
   ]
 }

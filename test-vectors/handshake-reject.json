@@ -1,0 +1,163 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 08",
+  "message": "HANDSHAKE_REJECT",
+  "message_type": "0x06",
+  "encoding_cases": [
+    {
+      "error": "INTERNAL_ERROR",
+      "error_code": "0x1",
+      "wire_hex": "060101"
+    },
+    {
+      "error": "PROTOCOL_VIOLATION",
+      "error_code": "0x2",
+      "wire_hex": "060102"
+    },
+    {
+      "error": "AUTHENTICATION_FAILED",
+      "error_code": "0x3",
+      "wire_hex": "060103"
+    },
+    {
+      "error": "RESOURCE_LIMIT",
+      "error_code": "0x5",
+      "wire_hex": "060105"
+    },
+    {
+      "error": "SESSION_NOT_FOUND",
+      "error_code": "0x6",
+      "wire_hex": "060106"
+    },
+    {
+      "error": "SESSION_CONFLICT",
+      "error_code": "0x7",
+      "wire_hex": "060107"
+    },
+    {
+      "error": "CARRIER_CONFLICT",
+      "error_code": "0xc",
+      "wire_hex": "06010c"
+    },
+    {
+      "error": "UNSUPPORTED_PARAMETER",
+      "error_code": "0xd",
+      "wire_hex": "06010d"
+    }
+  ],
+  "invalid_core_error_cases": [
+    {
+      "error": "NO_ERROR",
+      "error_code": "0x00",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "VERSION_UNSUPPORTED",
+      "error_code": "0x04",
+      "expected": "use_VERSION_NEGOTIATION_or_close"
+    },
+    {
+      "error": "STREAM_LIMIT",
+      "error_code": "0x08",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "FLOW_CONTROL_ERROR",
+      "error_code": "0x09",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "FRAME_ENCODING_ERROR",
+      "error_code": "0x0a",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "STREAM_STATE_ERROR",
+      "error_code": "0x0e",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "FINAL_SIZE_ERROR",
+      "error_code": "0x0f",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    },
+    {
+      "error": "TRANSMISSION_ID_ERROR",
+      "error_code": "0x10",
+      "expected": "invalid_in_core_HANDSHAKE_REJECT"
+    }
+  ],
+  "behavior_cases": [
+    {
+      "name": "join-session-not-found",
+      "phase": "after_CLIENT_INIT_before_SERVER_FINISHED",
+      "error": "SESSION_NOT_FOUND",
+      "expected": "send_reject_if_safely_reportable_then_close_candidate",
+      "existing_session_modified": false
+    },
+    {
+      "name": "join-carrier-conflict",
+      "phase": "after_CLIENT_INIT_before_SERVER_FINISHED",
+      "error": "CARRIER_CONFLICT",
+      "expected": "send_reject_if_safely_reportable_then_close_candidate",
+      "generation_advanced": false
+    },
+    {
+      "name": "create-session-id-collision",
+      "phase": "after_CLIENT_INIT_before_SERVER_FINISHED",
+      "error": "SESSION_CONFLICT",
+      "expected": "send_reject_if_safely_reportable_then_close_candidate",
+      "existing_session_modified": false
+    },
+    {
+      "name": "unknown-critical-parameter",
+      "phase": "after_CLIENT_INIT_before_SERVER_FINISHED",
+      "error": "UNSUPPORTED_PARAMETER",
+      "expected": "send_reject_if_safely_reportable_then_close_candidate"
+    },
+    {
+      "name": "client-finished-auth-failure",
+      "phase": "after_CLIENT_FINISHED_before_SERVER_FINISHED",
+      "error": "AUTHENTICATION_FAILED",
+      "expected": "may_send_reject_then_close_candidate",
+      "existing_session_modified": false
+    },
+    {
+      "name": "malformed-no-safe-boundary",
+      "phase": "handshake",
+      "error": "PROTOCOL_VIOLATION",
+      "safe_response_boundary": false,
+      "expected": "close_candidate_without_reject"
+    },
+    {
+      "name": "unsupported-preface-version",
+      "phase": "before_CLIENT_INIT",
+      "error": "VERSION_UNSUPPORTED",
+      "expected": "VERSION_NEGOTIATION_or_close_not_HANDSHAKE_REJECT"
+    },
+    {
+      "name": "reject-is-unauthenticated",
+      "received_error": "SESSION_CONFLICT",
+      "expected": [
+        "terminate_candidate",
+        "do_not_authenticate_peer",
+        "do_not_modify_existing_session",
+        "do_not_downgrade_version"
+      ]
+    },
+    {
+      "name": "unknown-extension-error-code",
+      "received_error_code": "0x40",
+      "expected": [
+        "terminate_candidate",
+        "diagnostic_reason_unknown",
+        "do_not_reply_with_reject"
+      ]
+    },
+    {
+      "name": "successful-transcript-excludes-reject",
+      "successful_handshake": true,
+      "expected": "HANDSHAKE_REJECT_absent_from_H0_H1_H2"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -89,7 +89,7 @@ While DORMANT:
 
 When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
 
-DORMANT retention duration is local policy. Draft 07 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+DORMANT retention duration is local policy. Draft 08 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
 
 The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
 
@@ -105,7 +105,9 @@ Existing protocol state MAY be processed only as required to complete local shut
 
 All Carrier transport state has been released.
 
-A Session ID in CLOSED state MUST NOT be reused for a new Session while the implementation still retains retirement state for that Session ID.
+A Session ID in CLOSED state MUST NOT be reused for a new Session while the implementation still retains retirement state for that Session ID. A received CREATE using such a retained Session ID is rejected as SESSION_CONFLICT and MUST NOT recreate or overwrite the retired Session.
+
+Once all state for that Session ID has been discarded, a future random collision cannot be distinguished from a new identifier and is processed normally. Implementations MUST NOT intentionally recycle retained Session IDs.
 
 ## 4. Carrier state
 
@@ -114,8 +116,8 @@ Each Carrier has the following lifecycle:
     TRANSPORT_CONNECTED
             |
             v
-       HANDSHAKING
-            |
+       HANDSHAKING ------------------> CLOSED
+            |                 reject / failure
             v
         ESTABLISHED
             |
@@ -125,7 +127,7 @@ Each Carrier has the following lifecycle:
             v
           CLOSED
 
-Only handshake messages are valid in HANDSHAKING.
+Only handshake messages are valid in HANDSHAKING. HANDSHAKE_REJECT is terminal for the candidate handshake: after sending or receiving it, the candidate transitions directly to CLOSED after transport teardown and MUST NOT enter ESTABLISHED.
 
 Only Secure Records are valid after ESTABLISHED.
 
@@ -172,7 +174,7 @@ Before the candidate reaches ESTABLISHED:
 - the candidate MUST NOT receive Session application Frames;
 - the candidate MUST NOT change Stream, credit, local Carrier-selection eligibility, or reliable Transmission state.
 
-If authentication or JOIN validation fails, the candidate is discarded and G remains unchanged.
+If authentication or JOIN validation fails, the candidate is discarded and G remains unchanged. When the failure is classifiable and a safe pre-SERVER_FINISHED response can be emitted, HANDSHAKE_REJECT SHOULD carry the applicable Error Code; receipt or transmission of that message does not itself modify Session or Generation state.
 
 ### 4.4. Generation comparison
 
@@ -347,7 +349,7 @@ While in OPENING, the Client MUST tolerate the following inbound Frames as **acc
 - RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
 
-Draft 07 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 08 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -498,7 +500,7 @@ A STREAM_CONSUMED Final Offset that differs from the local established final siz
 
 ## 12. TRANSMISSION_ACK validity
 
-Transmission IDs are Session-wide and monotonically allocated.
+Transmission IDs are Session-wide and allocated consecutively beginning at 1 without gaps, reuse, or wrap.
 
 On receiving TRANSMISSION_ACK:
 
@@ -508,6 +510,12 @@ On receiving TRANSMISSION_ACK:
 4. if implementation state has compacted an older settled Transmission, the acknowledgement is treated as a stale duplicate.
 
 The Stream ID carried by TRANSMISSION_ACK MUST match the Stream ID of the referenced Transmission. A mismatch is TRANSMISSION_ID_ERROR.
+
+### 12.1. Transmission-ID exhaustion
+
+Transmission ID 2^62 - 1 is the final allocatable reliable Transmission ID in a Session. Allocation never wraps to 1 and no earlier ID becomes reusable.
+
+After that ID is allocated, the endpoint may still settle, retransmit, reinject, or receive acknowledgements for existing Transmissions. It MUST NOT create a new reliable Transmission. If protocol or application progress requires a new reliable Transmission, the endpoint transitions the Session to CLOSING and SHOULD send SESSION_CLOSE with RESOURCE_LIMIT when an authenticated writable Carrier exists.
 
 ## 13. STREAM_CREDIT validity after terminal state
 
@@ -604,6 +612,12 @@ Frames received for a retired identity:
 
 The endpoint MUST retain enough information for the Session lifetime to prevent a retired Stream ID from becoming a new Stream again.
 
+### 18.1. Stream-ID exhaustion
+
+For the Draft 08 Client-initiated Stream space, 2^62 - 1 is the final allocatable odd Stream ID. Stream allocation never wraps and retired or closed Stream IDs never become reusable.
+
+After the Client allocates Stream ID 2^62 - 1, no additional Stream can be created in that Session. Existing Streams and Session state remain valid. A later local request to create a Stream is rejected locally unless the implementation chooses to close the Session with RESOURCE_LIMIT.
+
 ## 19. Unknown Stream IDs
 
 Because Stream Frames can reorder across Carriers, a Stream ID lower than the largest observed Stream ID is not automatically invalid.
@@ -650,7 +664,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 07 implementation MUST:
+A conforming Draft 08 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;

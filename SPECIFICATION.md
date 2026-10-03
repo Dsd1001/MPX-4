@@ -1,7 +1,7 @@
 # MPX/4 Core Protocol Specification
 
 **Document:** MPX/4 Core Protocol  
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4  
 **Status:** Working Draft
 
@@ -96,7 +96,7 @@ Transport Binding
 
 Loss of an individual Carrier does not by itself terminate the Session. If the last active Carrier is lost or closed without SESSION_CLOSE, an endpoint that retains the Session enters DORMANT state as defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-DORMANT retention duration is local implementation policy in Draft 07 and is not a negotiated availability guarantee.
+DORMANT retention duration is local implementation policy in Draft 08 and is not a negotiated availability guarantee.
 
 Stream byte ordering is defined by Stream offsets, not Carrier order.
 
@@ -106,7 +106,7 @@ MPX/4 Core is defined independently of transport packet boundaries.
 
 A transport binding specifies how one MPX Carrier maps onto an underlying ordered transport, including connection establishment, byte-stream parsing, transport loss, replacement, and close behavior.
 
-The normative baseline binding for Draft 07 is:
+The normative baseline binding for Draft 08 is:
 
 - [MPX/4 over TCP](bindings/tcp.md)
 
@@ -153,6 +153,45 @@ VERSION_NEGOTIATION is unauthenticated and is valid only before CLIENT_INIT on t
 
 A post-preface authentication or protocol failure MUST NOT be interpreted as permission to downgrade automatically.
 
+### 5.2. HANDSHAKE_REJECT
+
+HANDSHAKE_REJECT is a pre-establishment diagnostic message for rejecting one candidate Carrier after the requested Protocol Version is understood.
+
+Its body is:
+
+    Error Code           VarInt
+
+HANDSHAKE_REJECT is unauthenticated and is not included in the successful Finished transcript. Receipt of HANDSHAKE_REJECT MUST terminate only the current candidate Carrier handshake. It MUST NOT by itself:
+
+- authenticate the peer;
+- create, modify, or retire Session state;
+- advance Carrier Generation;
+- change flow-control, Stream, or reliable Transmission state;
+- trigger Protocol Version downgrade or enable a disabled version.
+
+An endpoint MAY send HANDSHAKE_REJECT only before SERVER_FINISHED has been sent or received on that candidate Carrier. After sending HANDSHAKE_REJECT, the sender MUST terminate the candidate transport. After receiving HANDSHAKE_REJECT, the receiver MUST terminate the candidate transport.
+
+When a candidate can be rejected after a complete error classification and the endpoint can safely emit a handshake message, it SHOULD send HANDSHAKE_REJECT with the applicable Core Error Code. If framing is too malformed to determine a safe response boundary, or if failure occurs after SERVER_FINISHED, the endpoint MAY terminate the transport without sending HANDSHAKE_REJECT.
+
+HANDSHAKE_REJECT MUST NOT be used to negotiate or signal an unsupported Connection Preface version. VERSION_NEGOTIATION or transport close is used for that case.
+
+The Error Code carried by HANDSHAKE_REJECT classifies why this candidate was rejected. Core HANDSHAKE_REJECT permits these Error Codes:
+
+- INTERNAL_ERROR;
+- PROTOCOL_VIOLATION;
+- AUTHENTICATION_FAILED;
+- RESOURCE_LIMIT;
+- SESSION_NOT_FOUND;
+- SESSION_CONFLICT;
+- CARRIER_CONFLICT;
+- UNSUPPORTED_PARAMETER.
+
+VERSION_UNSUPPORTED is not carried in HANDSHAKE_REJECT because version mismatch is handled before CLIENT_INIT by VERSION_NEGOTIATION or transport close. NO_ERROR and post-establishment/Stream-specific Error Codes are invalid in Core HANDSHAKE_REJECT.
+
+An extension MAY define an extension Error Code as valid in HANDSHAKE_REJECT. A receiver that does not recognize the carried Error Code still terminates the candidate transport and treats the diagnostic reason as unknown; it MUST NOT send another HANDSHAKE_REJECT in response.
+
+Because the message is unauthenticated, applications and retry logic MUST treat the code as advisory until a separately authenticated relationship exists.
+
 ## 6. Variable-length integers
 
 MPX/4 uses a 1-, 2-, 4-, or 8-octet variable-length integer representation.
@@ -172,7 +211,7 @@ Encoders MUST use the shortest representation capable of holding a value. Receiv
 
 ## 7. Handshake framing and Parameter rules
 
-A newly connected Carrier progresses through:
+A successful newly connected Carrier progresses through:
 
     TRANSPORT_CONNECTED
             |
@@ -194,6 +233,8 @@ A newly connected Carrier progresses through:
             v
     ESTABLISHED
 
+At any pre-establishment stage after the Protocol Version is understood, a classified candidate failure can instead terminate the handshake via HANDSHAKE_REJECT followed by transport close. A failure that cannot be safely reported terminates the candidate transport directly. Neither path reaches ESTABLISHED.
+
 A Carrier MUST NOT carry Secure Records before entering ESTABLISHED.
 
 ### 7.1. Handshake message format
@@ -204,7 +245,7 @@ Each handshake message is:
     Message Length      VarInt
     Message Body        Message Length octets
 
-Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 07.
+Message Length MUST use canonical VarInt encoding and MUST NOT exceed 4096 octets in Draft 08.
 
 ### 7.2. Parameter format
 
@@ -217,11 +258,11 @@ CLIENT_INIT and SERVER_INIT contain Parameters:
 
 Bit 0 of Flags is CRITICAL. Bits 1 through 7 are reserved and MUST be zero.
 
-Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 07.
+Parameters MUST appear in strictly increasing Parameter Type order. A Parameter Type MUST NOT occur more than once in one handshake message in Draft 08.
 
 An endpoint receiving an unknown Parameter with CRITICAL=0 MUST ignore its value after validating its encoded length.
 
-An endpoint receiving an unknown Parameter with CRITICAL=1 MUST abort the handshake.
+An endpoint receiving an unknown Parameter with CRITICAL=1 MUST reject the candidate handshake with UNSUPPORTED_PARAMETER and, when a safe response boundary is known, SHOULD send HANDSHAKE_REJECT(UNSUPPORTED_PARAMETER).
 
 Malformed, duplicate, out-of-order, or contradictory Core Parameters are protocol errors.
 
@@ -230,6 +271,12 @@ Malformed, duplicate, out-of-order, or contradictory Core Parameters are protoco
 ### 8.1. SESSION_ID
 
 SESSION_ID is exactly 16 octets and identifies an MPX Session. A newly created Session ID MUST be generated from a cryptographically secure random source and MUST NOT be all zero.
+
+An initiating endpoint MUST NOT intentionally reuse a Session ID for which it still retains Session or retirement state.
+
+On CREATE, a receiving endpoint MUST reject the candidate with SESSION_CONFLICT if the offered SESSION_ID already identifies a CREATING, ACTIVE, DORMANT, or CLOSING Session, or if retained CLOSED retirement state still reserves that Session ID. The candidate MUST NOT overwrite, merge with, or be reinterpreted as a JOIN to the existing or retired Session.
+
+If the receiving endpoint no longer retains any state for a previously used random Session ID, the protocol cannot distinguish that historical value from a fresh collision; normal CREATE processing applies.
 
 ### 8.2. SESSION_ACTION
 
@@ -266,7 +313,7 @@ SERVER_NONCE appears only in SERVER_INIT.
 
 MAX_FRAME_PAYLOAD is the maximum STREAM_DATA Data field, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 07 values are 1 through 32768.
+Valid Draft 08 values are 1 through 32768.
 
 A peer MUST NOT send a larger STREAM_DATA Data field.
 
@@ -274,7 +321,7 @@ A peer MUST NOT send a larger STREAM_DATA Data field.
 
 MAX_RECORD_SIZE is the maximum Secure Record plaintext length, in octets, that the sender of the Parameter is willing to receive.
 
-Valid Draft 07 values are 1024 through 65536.
+Valid Draft 08 values are 1024 through 65536.
 
 The record header and 16-octet AEAD tag are not included in this value.
 
@@ -284,7 +331,7 @@ A sender MUST ensure that each complete Frame fits within one Secure Record and 
 
 MAX_STREAMS is the maximum number of simultaneously active peer-initiated Streams that the sender of the Parameter is willing to maintain.
 
-Valid Draft 07 values are 1 through 2048.
+Valid Draft 08 values are 1 through 2048.
 
 Stream IDs are not bounded by MAX_STREAMS; the value limits concurrency.
 
@@ -294,7 +341,7 @@ MAX_CARRIERS is a Session capability advertised independently by both endpoints.
 
 Its value is the maximum number of simultaneously active logical Carriers that the sender is willing to maintain in this Session. Valid values are 1 through 2^62 - 1.
 
-MAX_CARRIERS MUST be encoded with the Parameter CRITICAL flag set to 1. A Draft 07 endpoint receiving MAX_CARRIERS with CRITICAL=0 MUST abort the handshake with PROTOCOL_VIOLATION.
+MAX_CARRIERS MUST be encoded with the Parameter CRITICAL flag set to 1. A Draft 08 endpoint receiving MAX_CARRIERS with CRITICAL=0 MUST abort the handshake with PROTOCOL_VIOLATION.
 
 During CREATE:
 
@@ -359,7 +406,7 @@ Optional extension Parameters MAY additionally appear according to their definin
 
 The first Carrier of a new Session SHOULD use Carrier ID 1 and Generation 0.
 
-The Server MUST NOT attach unauthenticated Carrier state to a live Session before validating CLIENT_FINISHED.
+The Server MUST NOT attach unauthenticated Carrier state to a live Session before validating CLIENT_FINISHED. A candidate CREATE or JOIN rejected before establishment SHOULD use HANDSHAKE_REJECT when Section 5.2 permits a safe response.
 
 A JOIN uses the same SESSION_ID, SESSION_ACTION=JOIN, a Carrier ID, Generation, fresh CLIENT_NONCE, Session-scoped limits, and the Session Protocol Version. MAX_FRAME_PAYLOAD, MAX_STREAMS, and MAX_CARRIERS MUST match the values already established for that endpoint; MAX_RECORD_SIZE MAY differ for the new Carrier.
 
@@ -434,7 +481,7 @@ Closing or losing a Carrier releases active concurrency capacity but does not ma
 
 ## 10. MPX/4 key schedule
 
-Draft 07 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
+Draft 08 uses a 32-octet pre-shared transport key as the authentication root, HKDF-SHA256 for key derivation, HMAC-SHA256 for Finished authentication, and AES-256-GCM for Secure Records.
 
 ### 10.1. MPX-Expand-Label
 
@@ -589,7 +636,7 @@ Wire format:
 
 ### 11.1. Record Flags
 
-Draft 07 defines no Record Flags.
+Draft 08 defines no Record Flags.
 
 Senders MUST transmit 0x00.
 
@@ -613,7 +660,7 @@ The sequence number increments by one after every successfully generated or auth
 
 The sequence number is not transmitted.
 
-Draft 07 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
+Draft 08 limits one application traffic key to 2^24 Secure Records in one direction. An endpoint MUST establish a fresh Carrier handshake before sending another record under that traffic key.
 
 ### 11.4. Nonce construction
 
@@ -658,7 +705,7 @@ Unknown Frame handling is determined by the registered range:
 - unknown values in the Core range 0x00 through 0x3f are a PROTOCOL_VIOLATION;
 - unknown values in the Extension range 0x40 through 0x3fff MUST be skipped by Frame Length unless a negotiated extension specifies stronger behavior;
 - values in the Private Use range 0x4000 through 0x7fff are valid only under an explicitly negotiated private profile;
-- all higher values are reserved and MUST be rejected in Draft 07.
+- all higher values are reserved and MUST be rejected in Draft 08.
 
 ### 12.2. PADDING
 
@@ -670,13 +717,15 @@ Its body has no semantic meaning and is ignored. Senders SHOULD fill PADDING bod
 
 Transmission IDs are Session-wide positive VarInts.
 
-A sender allocates Transmission IDs monotonically beginning at 1. A Transmission ID MUST NOT be reused within a Session after allocation.
+A sender allocates Transmission IDs as consecutive positive integers beginning at 1: 1, 2, 3, .... A Transmission ID MUST NOT be skipped, reused within a Session after allocation, or wrapped. The maximum allocatable Transmission ID is 2^62 - 1.
+
+After allocating Transmission ID 2^62 - 1, that endpoint's Transmission-ID namespace is exhausted for the Session. It MUST NOT allocate another reliable Transmission ID. Existing Transmissions and non-reliable/idempotent protocol state may continue to be processed. If further application or protocol work requires allocation of another reliable Transmission, the endpoint MUST transition the Session to CLOSING and SHOULD send SESSION_CLOSE with RESOURCE_LIMIT on an authenticated writable Carrier.
 
 Retransmission and reinjection of an outstanding Transmission MUST retain the same Transmission ID and the same logical Frame contents.
 
 An Attempt is one concrete send of that Transmission on one Carrier. Attempt identity is local implementation state and is not encoded on the wire.
 
-If a receiver observes the same Transmission ID with different semantic Frame contents, it MUST close the Session with PROTOCOL_VIOLATION.
+If a receiver observes the same Transmission ID with different semantic Frame contents, it MUST close the Session with TRANSMISSION_ID_ERROR.
 
 A duplicate of an already processed reliable Transmission MUST be processed idempotently and its confirmation MUST be sent again.
 
@@ -698,13 +747,15 @@ A duplicate of an already processed reliable Transmission MUST be processed idem
 
 ## 14. Stream identifiers and opening
 
-Draft 07 supports Client-initiated bidirectional Streams.
+Draft 08 supports Client-initiated bidirectional Streams.
 
 Client Stream IDs are positive odd integers allocated monotonically:
 
-    1, 3, 5, 7, ...
+    1, 3, 5, 7, ... , 2^62 - 1
 
-A Stream ID MUST NOT be reused within a Session.
+A Stream ID MUST NOT be reused within a Session and MUST NOT wrap.
+
+After Stream ID 2^62 - 1 has been allocated, the Client Stream-ID namespace is exhausted for that Session. The Client MUST NOT create another Stream in that Session. Existing Streams and the Session MAY remain active; a subsequent local application request to open another Stream MUST fail locally rather than reuse or wrap the Stream ID. An implementation MAY choose to close the Session with RESOURCE_LIMIT, but closure is not required solely because the Stream-ID namespace is exhausted.
 
 Because Frames can traverse different Carriers, a receiver MUST tolerate STREAM_OPEN arrival order that differs from numeric Stream-ID order.
 
@@ -821,7 +872,7 @@ Consumed Offset and Maximum Offset MUST be monotonically non-decreasing.
 
 Maximum Offset MUST be greater than or equal to Consumed Offset.
 
-Draft 07 limits:
+Draft 08 limits:
 
     Maximum Offset - Consumed Offset <= 16 MiB
 
@@ -854,7 +905,7 @@ Both values MUST be monotonically non-decreasing.
 
 Maximum Bytes MUST be greater than or equal to Consumed Bytes.
 
-Draft 07 limits:
+Draft 08 limits:
 
     Maximum Bytes - Consumed Bytes <= 128 MiB
 
@@ -1054,7 +1105,7 @@ to estimate path behavior.
 
 A first-attempt STREAM_DATA acknowledgement returned on the same Carrier can provide a path-specific delivery sample.
 
-Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 07 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
+Once a Transmission has multiple Attempts, attribution is ambiguous unless an extension explicitly identifies Attempts. Draft 08 therefore prohibits treating such acknowledgements as unambiguous per-Carrier delivery-rate samples.
 
 Delivery-rate estimation SHOULD avoid treating application-limited traffic as path capacity.
 
@@ -1062,7 +1113,7 @@ Delivery-rate estimation SHOULD avoid treating application-limited traffic as pa
 
 The normative MPX/4 state machines, Frame-validity matrices, cross-Carrier reordering rules, terminal Stream rules, tombstone requirements, and retired-identity behavior are defined in [STATE-MACHINES.md](STATE-MACHINES.md).
 
-That document is part of the MPX/4 Core specification for Draft 07.
+That document is part of the MPX/4 Core specification for Draft 08.
 
 In particular, conforming implementations MUST support:
 
@@ -1078,7 +1129,7 @@ An implementation MAY use different internal state names or data structures, but
 
 ## 27. Resource limits
 
-Draft 07 Core limits are:
+Draft 08 Core limits are:
 
 | Limit | Value |
 |---|---:|
@@ -1130,7 +1181,7 @@ Implementations MUST validate lengths and integer arithmetic before allocation, 
 
 Implementations SHOULD bound unauthenticated handshake state, pending reliable Transmissions, receive buffering, and failed authentication work.
 
-Draft 07 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
+Draft 08 does not provide forward secrecy because the mandatory key schedule is rooted only in the pre-shared transport key. A future negotiated key-exchange profile can add forward secrecy without changing the Session, Carrier, or Stream model.
 
 ## 30. Wire-size considerations
 
@@ -1144,7 +1195,7 @@ MPX Frame and Secure Record sizes are protocol limits, not network MTUs. The und
 
 ## 31. Conformance requirements
 
-A conforming Draft 07 implementation MUST:
+A conforming Draft 08 implementation MUST:
 
 - recognize the MPX/4 Connection Preface;
 - reject non-canonical VarInts;
@@ -1155,8 +1206,9 @@ A conforming Draft 07 implementation MUST:
 - compute and retain the immutable Effective Carrier Limit as the minimum of the two CREATE-time MAX_CARRIERS advertisements;
 - accept non-zero CARRIER_ID values across the full MPX VarInt range independently of Carrier concurrency;
 - enforce Active Carrier Count against the Effective Carrier Limit;
-- implement the Draft 07 key schedule exactly;
+- implement the Draft 08 key schedule exactly;
 - implement CLIENT_FINISHED and SERVER_FINISHED verification;
+- implement HANDSHAKE_REJECT as an unauthenticated candidate-only rejection signal without mutating existing Session state or triggering downgrade;
 - implement AES-256-GCM Secure Records with the specified nonce and AAD construction;
 - enforce peer receive limits;
 - implement the Core Frame set in REGISTRIES.md;
@@ -1167,10 +1219,11 @@ A conforming Draft 07 implementation MUST:
 - commit a higher Carrier Generation only after successful Carrier establishment;
 - prevent superseded Carriers from creating new protocol state or receiving new Attempts;
 - preserve Transmission IDs across retransmission and reinjection;
-- never reuse a Transmission ID within a Session;
+- never reuse or wrap a Transmission ID within a Session and apply the defined exhaustion behavior;
 - distinguish settled duplicate acknowledgements from never-allocated Transmission IDs;
 - enforce Stream and Session flow-control rules;
 - preserve Stream byte identity across Carriers;
+- never reuse or wrap a Stream ID within a Session and apply the defined exhaustion behavior;
 - reject conflicting overlapping Stream bytes;
 - preserve final-size invariants;
 - tolerate the specified cross-Carrier reordering cases;
@@ -1184,11 +1237,11 @@ A conforming Draft 07 implementation MUST:
 - ignore unsupported optional scheduling or path-metadata extensions safely when their defining extension permits it;
 - implement at least one conforming transport binding;
 - when claiming TCP interoperability, implement bindings/tcp.md;
-- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 07 Core interoperability claim.
+- pass the Mandatory behavior groups in INTEROPERABILITY.md for a Draft 08 Core interoperability claim.
 
 ## 32. Future work
 
-The following remain outside Draft 07:
+The following remain outside Draft 08:
 
 - ephemeral key exchange and forward secrecy;
 - datagram transport;
@@ -1199,7 +1252,7 @@ The following remain outside Draft 07:
 - explicit Carrier migration;
 - standardized scheduler algorithms or profiles;
 - additional path-metadata extensions;
-- additional transport bindings beyond the Draft 07 TCP baseline.
+- additional transport bindings beyond the Draft 08 TCP baseline.
 
 ## 33. Normative references
 
@@ -1228,8 +1281,10 @@ An interoperable MPX/4 implementation preserves these invariants:
 11. Session Protocol Version is immutable after CREATE.
 12. DORMANT preserves authenticated Session-owned state while Active Carrier Count is zero.
 13. Carrier-selection policy is endpoint-local and does not alter Core Stream, Transmission, flow-control, or Carrier-eligibility semantics.
+14. Transmission IDs, Stream IDs, and Carrier Generations never wrap; Session, Carrier, Stream, and Transmission identities are never reused contrary to their lifetime rules.
+15. A rejected pre-establishment candidate cannot mutate an existing Session.
 
-## Appendix B. Draft 07 wire constants
+## Appendix B. Draft 08 wire constants
 
     Protocol magic                     4d 50 58 00
     Protocol version                   4
@@ -1242,6 +1297,9 @@ An interoperable MPX/4 implementation preserves these invariants:
     Client nonce length                32 octets
     Server nonce length                32 octets
     Session ID length                  16 octets
+    HANDSHAKE_REJECT Message Type      0x06
     MAX_CARRIERS Parameter Type        0x0a
     CARRIER_ID range                   1 .. 2^62-1
+    Transmission ID range              1 .. 2^62-1, consecutive
+    Client Stream ID range             odd 1 .. 2^62-1
     MAX_CARRIERS value range           1 .. 2^62-1

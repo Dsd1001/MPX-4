@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -78,7 +78,11 @@ Before a Carrier reaches ESTABLISHED, CARRIER_CLOSE and SESSION_CLOSE are not av
 
 A handshake failure therefore terminates only the candidate Carrier connection unless the failure separately invalidates an already established Session.
 
-Rejecting a candidate JOIN MUST NOT modify the existing Session.
+When the requested Protocol Version is understood, the failure has a classified Core Error Code, and a safe response can be emitted before SERVER_FINISHED, the endpoint SHOULD send HANDSHAKE_REJECT carrying that Error Code and then terminate the candidate transport. If those conditions do not hold, terminating the candidate transport without HANDSHAKE_REJECT is valid.
+
+HANDSHAKE_REJECT is unauthenticated. Its Error Code is diagnostic wire information, not authenticated proof of why the peer rejected the candidate. Receipt of the message MUST NOT mutate an existing Session or trigger Protocol Version downgrade.
+
+Rejecting a candidate CREATE or JOIN MUST NOT modify any existing Session.
 
 ## 3. Core Error Code scope
 
@@ -88,17 +92,17 @@ The following table defines the Core scope of each registered Error Code.
 |---|---|---|
 | NO_ERROR | Closure signal | Graceful CARRIER_CLOSE or SESSION_CLOSE; not a failure |
 | INTERNAL_ERROR | Contextual | Use the smallest scope whose state cannot safely continue |
-| PROTOCOL_VIOLATION | Carrier before ESTABLISHED; Session after ESTABLISHED | Reject candidate Carrier, or SESSION_CLOSE after establishment |
-| AUTHENTICATION_FAILED | Carrier | Terminate the affected Carrier; authenticated error reporting is optional |
+| PROTOCOL_VIOLATION | Carrier before ESTABLISHED; Session after ESTABLISHED | HANDSHAKE_REJECT when safely reportable before SERVER_FINISHED, otherwise terminate candidate; SESSION_CLOSE after establishment |
+| AUTHENTICATION_FAILED | Carrier | HANDSHAKE_REJECT when safely reportable before SERVER_FINISHED; otherwise terminate the affected Carrier |
 | VERSION_UNSUPPORTED | Pre-establishment Carrier | VERSION_NEGOTIATION when applicable, then terminate candidate Carrier |
-| RESOURCE_LIMIT | Contextual | STREAM_OPEN_REJECT, candidate-Carrier rejection, CARRIER_CLOSE, or SESSION_CLOSE according to the exhausted resource |
-| SESSION_NOT_FOUND | Pre-establishment Carrier | Reject JOIN candidate; existing Sessions are unaffected |
-| SESSION_CONFLICT | Pre-establishment Carrier | Reject CREATE/JOIN candidate; existing Session is unaffected |
+| RESOURCE_LIMIT | Contextual | STREAM_OPEN_REJECT, HANDSHAKE_REJECT for a reportable candidate rejection, CARRIER_CLOSE, or SESSION_CLOSE according to the exhausted resource |
+| SESSION_NOT_FOUND | Pre-establishment Carrier | HANDSHAKE_REJECT when safely reportable; reject JOIN candidate; existing Sessions are unaffected |
+| SESSION_CONFLICT | Pre-establishment Carrier | HANDSHAKE_REJECT when safely reportable; reject CREATE/JOIN candidate; existing Session is unaffected |
 | STREAM_LIMIT | Stream opening | STREAM_OPEN_REJECT |
 | FLOW_CONTROL_ERROR | Session | SESSION_CLOSE |
 | FRAME_ENCODING_ERROR | Carrier | CARRIER_CLOSE when safely reportable; otherwise terminate Carrier |
-| CARRIER_CONFLICT | Pre-establishment Carrier | Reject candidate Carrier |
-| UNSUPPORTED_PARAMETER | Pre-establishment Carrier | Reject candidate Carrier |
+| CARRIER_CONFLICT | Pre-establishment Carrier | HANDSHAKE_REJECT when safely reportable; reject candidate Carrier |
+| UNSUPPORTED_PARAMETER | Pre-establishment Carrier | HANDSHAKE_REJECT when safely reportable; reject candidate Carrier |
 | STREAM_STATE_ERROR | Session, except explicit STREAM_OPEN rejection cases | SESSION_CLOSE, or STREAM_OPEN_REJECT where this specification explicitly permits rejection |
 | FINAL_SIZE_ERROR | Session | SESSION_CLOSE |
 | TRANSMISSION_ID_ERROR | Session | SESSION_CLOSE |
@@ -128,12 +132,14 @@ RESOURCE_LIMIT represents an exhausted local resource.
 The protocol action depends on the resource being protected:
 
 - inability to accept one additional Stream: STREAM_OPEN_REJECT;
-- inability to complete one candidate Carrier handshake: terminate that candidate Carrier;
+- inability to complete one candidate Carrier handshake: reject that candidate and send HANDSHAKE_REJECT(RESOURCE_LIMIT) when safely reportable;
 - a candidate whose establishment would exceed the negotiated Effective Carrier Limit: reject that candidate with RESOURCE_LIMIT;
 - an established Carrier-specific resource limit: CARRIER_CLOSE;
 - a Session-wide resource condition under which shared state cannot safely continue: SESSION_CLOSE.
 
 General resource policy, memory sizing, queue sizing, handshake-admission policy, DORMANT retention duration, and eviction strategy remain local implementation choices. The explicit exception is active logical Carrier concurrency: MAX_CARRIERS is negotiated by Core and defines the immutable Effective Carrier Limit for the Session.
+
+Exhaustion of the Session-wide Transmission-ID namespace is a Session resource condition when another reliable Transmission would be required and therefore leads to SESSION_CLOSE(RESOURCE_LIMIT). Exhaustion of the Client Stream-ID namespace prevents creation of additional Streams but does not by itself require Session closure.
 
 ## 5. Error selection precedence
 
@@ -171,7 +177,7 @@ Failure to authenticate or decrypt a Secure Record is Carrier-scoped.
 
 After Secure Record authentication failure, the endpoint MUST NOT process any plaintext from that record and MUST stop accepting further protocol state from that Carrier incarnation.
 
-Because the peer identity or record integrity is not established for the failed input, an implementation MAY close the transport without sending CARRIER_CLOSE.
+Because the peer identity or record integrity is not established for the failed input, an implementation MAY close the transport without sending CARRIER_CLOSE. For a pre-SERVER_FINISHED handshake authentication failure, HANDSHAKE_REJECT(AUTHENTICATION_FAILED) MAY be sent when a safe response can be emitted; it remains unauthenticated.
 
 Other authenticated Carriers in the same Session remain valid unless a separate Session-scoped error occurs.
 
@@ -180,7 +186,7 @@ Other authenticated Carriers in the same Session remain valid unless a separate 
 The following failures reject only the candidate Carrier:
 
 - SESSION_NOT_FOUND;
-- SESSION_CONFLICT, including JOIN using a Protocol Version different from the immutable Session Protocol Version;
+- SESSION_CONFLICT, including JOIN using a Protocol Version different from the immutable Session Protocol Version and CREATE colliding with a retained Session ID;
 - CARRIER_CONFLICT;
 - UNSUPPORTED_PARAMETER;
 - AUTHENTICATION_FAILED;
@@ -189,7 +195,9 @@ The following failures reject only the candidate Carrier:
 
 A JOIN candidate that would make the endpoint's local Active Carrier Count exceed the Effective Carrier Limit is rejected with RESOURCE_LIMIT. The existing Session remains active.
 
-A failed JOIN MUST NOT:
+When one of these failures is safely classifiable before SERVER_FINISHED, the rejecting endpoint SHOULD expose the same Error Code in HANDSHAKE_REJECT. The local error classification remains authoritative to the rejecting endpoint; the received unauthenticated code is advisory to the peer.
+
+A failed CREATE or JOIN MUST NOT:
 
 - change the Session Protocol Version;
 - change either endpoint's stored MAX_CARRIERS advertisement or the Effective Carrier Limit;

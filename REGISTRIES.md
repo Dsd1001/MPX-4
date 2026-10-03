@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 07
+**Registry Revision:** Draft 08
 
 This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
@@ -30,7 +30,8 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x03 | CLIENT_FINISHED | Core |
 | 0x04 | SERVER_FINISHED | Core |
 | 0x05 | VERSION_NEGOTIATION | Core |
-| 0x06–0x3f | — | Core-reserved |
+| 0x06 | HANDSHAKE_REJECT | Core |
+| 0x07–0x3f | — | Core-reserved |
 | 0x40–0x3fff | — | Extension |
 | 0x4000–0x7fff | — | Private Use |
 | 0x8000–2^62-1 | — | Reserved |
@@ -129,7 +130,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 07 |
+| 1–7 | RESERVED | MUST be zero in Draft 08 |
 
 ## 7. Registry stability
 

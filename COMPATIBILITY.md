@@ -1,7 +1,7 @@
 # MPX/4 Versioning and Compatibility
 
 **Document:** MPX/4 Versioning and Compatibility
-**Revision:** Draft 07
+**Revision:** Draft 08
 **Protocol Version:** 4
 **Status:** Normative Working Draft
 
@@ -46,7 +46,9 @@ A Client receiving VERSION_NEGOTIATION:
 - SHOULD select the highest mutually supported permitted version when retrying;
 - MUST perform any retry on a fresh underlying transport connection with a fresh Connection Preface and fresh handshake state.
 
-An authentication failure, Secure Record failure, or other post-preface protocol failure MUST NOT be interpreted as permission to downgrade the Protocol Version automatically.
+An authentication failure, Secure Record failure, HANDSHAKE_REJECT, or other post-preface protocol failure MUST NOT be interpreted as permission to downgrade the Protocol Version automatically.
+
+HANDSHAKE_REJECT is a candidate-failure diagnostic within an already understood Protocol Version. It is not version negotiation and MUST NOT enable or select another Protocol Version.
 
 ## 4. Stable-version compatibility rules
 
