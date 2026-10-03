@@ -1,7 +1,7 @@
 # MPX/4 Versioning and Compatibility
 
 **Document:** MPX/4 Versioning and Compatibility
-**Revision:** Draft 06
+**Revision:** Draft 07
 **Protocol Version:** 4
 **Status:** Normative Working Draft
 
@@ -29,7 +29,7 @@ A candidate Carrier using a Protocol Version unsupported by the endpoint is hand
 
 If an endpoint supports the candidate Protocol Version but the candidate later identifies a Session created under a different Protocol Version, the candidate MUST be rejected with SESSION_CONFLICT. The existing Session MUST NOT be modified.
 
-A Session Protocol Version is never renegotiated by JOIN, Carrier replacement, scheduler selection, or an extension.
+A Session Protocol Version is never renegotiated by JOIN, Carrier replacement, local Carrier-selection policy, or an extension.
 
 ## 3. VERSION_NEGOTIATION
 
@@ -87,7 +87,6 @@ An extension MAY use:
 - an optional handshake Parameter;
 - a published extension Frame Type;
 - a published extension Error Code;
-- a published scheduler profile;
 - another explicitly defined negotiation mechanism.
 
 An extension MUST NOT assume that the peer implements it merely because both endpoints use the same Core Protocol Version.

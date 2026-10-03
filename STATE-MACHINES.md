@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 06
+**Revision:** Draft 07
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -89,7 +89,7 @@ While DORMANT:
 
 When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
 
-DORMANT retention duration is local policy. Draft 06 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+DORMANT retention duration is local policy. Draft 07 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
 
 The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
 
@@ -170,7 +170,7 @@ Before the candidate reaches ESTABLISHED:
 - G remains current;
 - the current Carrier remains eligible subject to its own liveness state;
 - the candidate MUST NOT receive Session application Frames;
-- the candidate MUST NOT change Stream, credit, scheduler, or reliable Transmission state.
+- the candidate MUST NOT change Stream, credit, local Carrier-selection eligibility, or reliable Transmission state.
 
 If authentication or JOIN validation fails, the candidate is discarded and G remains unchanged.
 
@@ -226,7 +226,6 @@ Replacement MUST preserve Session identity and all Session-owned state, includin
 - Stream IDs and Stream offsets;
 - Stream opening and terminal state;
 - Stream and Session flow-control accounting;
-- the Session Scheduler ID;
 - allocated, outstanding, settled, and retired Transmission IDs;
 - tombstones and retired Stream identities.
 
@@ -348,7 +347,7 @@ While in OPENING, the Client MUST tolerate the following inbound Frames as **acc
 - RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
 
-Draft 06 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 07 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -651,7 +650,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 06 implementation MUST:
+A conforming Draft 07 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;

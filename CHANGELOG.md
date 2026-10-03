@@ -4,6 +4,52 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
+## Draft 07 — 2026-10-04
+
+Draft 07 is a Core-slimming revision. It removes scheduler-mode negotiation and capacity signaling from the mandatory Core protocol so that Carrier-selection policy remains local to each sending endpoint.
+
+### Removed from Core
+
+- Handshake Parameter `SCHEDULER` at Draft 06 Parameter Type `0x10`.
+- Handshake Parameter `PATH_CAPACITY` at Draft 06 Parameter Type `0x11`.
+- Error Code `SCHEDULER_MISMATCH` at Draft 06 Error Code `0x0b`.
+- The Core Scheduler-ID registry and the Core `AUTO`, `AGGREGATE`, `PROTECT`, and `WEIGHTED` mode names.
+- Any requirement that both endpoints agree on or expose the same scheduling policy.
+
+The retired Draft 06 numeric assignments remain Reserved and are not reused by Draft 07 Core.
+
+### Core Carrier-selection model
+
+Each endpoint chooses an eligible Carrier independently for each locally originated Transmission Attempt. Core standardizes only the invariants that local policy must preserve: Stream byte identity, Transmission identity, flow-control accounting, Carrier eligibility, Generation supersession, duplicate suppression, and Session/Stream reliability.
+
+Round-robin, aggregate, protect, weighted, latency-aware, cost-aware, and adaptive selection are implementation policies rather than wire protocol state.
+
+### Carrier Receive Capacity Hint extension
+
+Draft 07 publishes the optional [Carrier Receive Capacity Hint extension](extensions/capacity-hint.md).
+
+The extension allocates Handshake Parameter Type `0x40` from the published-extension range:
+
+    RECEIVE_CAPACITY_HINT
+
+The Parameter is Carrier-scoped, uses `CRITICAL=0`, and carries one configured estimate for traffic the peer sends toward the advertising endpoint. It is unilateral and safely ignorable; it does not activate a shared scheduler mode.
+
+Transparent Relays do not participate. The hint describes the Carrier end to end and does not expose or standardize Client-to-Relay / Relay-to-Server topology segments.
+
+An implementation may consume the hint in a local policy it calls Weighted, but the weighting algorithm remains implementation-defined.
+
+### Cryptographic vectors
+
+Draft 07 keeps the Draft 06 key-schedule algorithm, cryptographic algorithms, Secure Record syntax, and Frame encodings.
+
+Because `SCHEDULER` was present in every Draft 06 Core CLIENT_INIT / SERVER_INIT transcript, removing it changes H0, Finished values, application traffic secrets, traffic keys, traffic IVs, and dependent Secure Record vectors. Draft 07 therefore publishes regenerated key-schedule and Secure Record vectors.
+
+### Compatibility
+
+Draft 07 remains development Protocol Version 4 and is intentionally not Core-handshake-compatible with Draft 06. This incompatibility is permitted before Version 4 stability under COMPATIBILITY.md.
+
+After Protocol Version 4 is declared stable, removing or adding mandatory Core handshake elements would require a new Protocol Version.
+
 ## Draft 06 — 2026-10-04
 
 Draft 06 is a stabilization revision focused on long-term protocol evolution, retained zero-Carrier Sessions, and implementation-neutral WEIGHTED capacity semantics.
@@ -18,7 +64,7 @@ Draft 06 is a stabilization revision focused on long-term protocol evolution, re
 - DORMANT recovery rules preserving Stream, flow-control, Generation, tombstone, retired-identity, and reliable Transmission state.
 - Machine-readable [session-lifecycle.json](test-vectors/session-lifecycle.json) cases.
 - Machine-readable [version-compatibility.json](test-vectors/version-compatibility.json) cases.
-- Machine-readable [path-capacity.json](test-vectors/path-capacity.json) encoding and WEIGHTED hint-availability cases.
+- Machine-readable `path-capacity.json` encoding and WEIGHTED hint-availability cases (retired from the current tree by Draft 07; retained in Git history).
 
 ### Changed
 

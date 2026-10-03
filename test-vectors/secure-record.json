@@ -1,9 +1,9 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 06",
+  "revision": "Draft 07",
   "direction": "client_to_server",
-  "traffic_key_hex": "f58314ba277e3894f97c347ee3813e6d732bd5f15614df6c7d10eb8d58ee4e74",
-  "traffic_iv_hex": "08683189ca0396f546adc383",
+  "traffic_key_hex": "095e2f7dc0505642121edf7613944f62d1e5d185bf431fcebcd7862a92f21eac",
+  "traffic_iv_hex": "125d55dacaf4bb44dc69329f",
   "records": [
     {
       "sequence_number": "0",
@@ -13,10 +13,10 @@
       "ciphertext_length_varint_hex": "0d",
       "aad_hex": "000d",
       "seq96_hex": "000000000000000000000000",
-      "nonce_hex": "08683189ca0396f546adc383",
-      "ciphertext_hex": "565a0587579f373d3a2fd329ac",
-      "authentication_tag_hex": "893d9bf502b0009f703ed09ca20da896",
-      "wire_record_hex": "000d565a0587579f373d3a2fd329ac893d9bf502b0009f703ed09ca20da896"
+      "nonce_hex": "125d55dacaf4bb44dc69329f",
+      "ciphertext_hex": "406d7fae1794dd7ff5848ed2ed",
+      "authentication_tag_hex": "85807a6e5c368cbe170c51118788869c",
+      "wire_record_hex": "000d406d7fae1794dd7ff5848ed2ed85807a6e5c368cbe170c51118788869c"
     },
     {
       "sequence_number": "1",
@@ -27,10 +27,10 @@
       "ciphertext_length_varint_hex": "03",
       "aad_hex": "0003",
       "seq96_hex": "000000000000000000000001",
-      "nonce_hex": "08683189ca0396f546adc382",
-      "ciphertext_hex": "38952b",
-      "authentication_tag_hex": "0018f89bb122b477432e64973a6e263f",
-      "wire_record_hex": "000338952b0018f89bb122b477432e64973a6e263f"
+      "nonce_hex": "125d55dacaf4bb44dc69329e",
+      "ciphertext_hex": "7754b0",
+      "authentication_tag_hex": "0910d0193ae9a8cd76a7a8f6cd0eebc8",
+      "wire_record_hex": "00037754b00910d0193ae9a8cd76a7a8f6cd0eebc8"
     }
   ]
 }

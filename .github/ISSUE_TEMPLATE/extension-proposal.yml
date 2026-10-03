@@ -1,5 +1,5 @@
 name: Extension proposal
-description: Propose a new MPX/4 Frame, Parameter, scheduler profile, transport binding, or protocol extension.
+description: Propose a new MPX/4 Frame, Parameter, Carrier metadata capability, transport binding, or protocol extension.
 title: "[extension] "
 labels: []
 body:

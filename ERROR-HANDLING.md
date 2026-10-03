@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 06
+**Revision:** Draft 07
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -97,7 +97,6 @@ The following table defines the Core scope of each registered Error Code.
 | STREAM_LIMIT | Stream opening | STREAM_OPEN_REJECT |
 | FLOW_CONTROL_ERROR | Session | SESSION_CLOSE |
 | FRAME_ENCODING_ERROR | Carrier | CARRIER_CLOSE when safely reportable; otherwise terminate Carrier |
-| SCHEDULER_MISMATCH | Pre-establishment Carrier | Reject candidate Carrier |
 | CARRIER_CONFLICT | Pre-establishment Carrier | Reject candidate Carrier |
 | UNSUPPORTED_PARAMETER | Pre-establishment Carrier | Reject candidate Carrier |
 | STREAM_STATE_ERROR | Session, except explicit STREAM_OPEN rejection cases | SESSION_CLOSE, or STREAM_OPEN_REJECT where this specification explicitly permits rejection |
@@ -182,7 +181,6 @@ The following failures reject only the candidate Carrier:
 
 - SESSION_NOT_FOUND;
 - SESSION_CONFLICT, including JOIN using a Protocol Version different from the immutable Session Protocol Version;
-- SCHEDULER_MISMATCH;
 - CARRIER_CONFLICT;
 - UNSUPPORTED_PARAMETER;
 - AUTHENTICATION_FAILED;
@@ -198,7 +196,6 @@ A failed JOIN MUST NOT:
 - advance the accepted Carrier Generation;
 - supersede an existing Carrier;
 - reset cryptographic state of another Carrier;
-- change Session Scheduler state;
 - change Stream or flow-control state.
 
 ## 9. Session-error atomicity

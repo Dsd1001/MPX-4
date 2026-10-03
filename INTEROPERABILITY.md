@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 06
+**Revision:** Draft 07
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 06 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 06 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 07 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 07 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -20,7 +20,6 @@ Unless a test states otherwise:
 - A acts as Client;
 - B acts as Server;
 - the transport binding is TCP;
-- SCHEDULER is AGGREGATE;
 - MAX_FRAME_PAYLOAD is 32768;
 - MAX_RECORD_SIZE is 65536;
 - MAX_STREAMS is at least 32;
@@ -389,7 +388,7 @@ After a higher Generation reaches ESTABLISHED, lower Generations of that Carrier
 
 ### J10. Session-state preservation
 
-Replacement preserves Stream state, flow-control state, Session Scheduler ID, tombstones, retired Stream IDs, and the Session-wide Transmission-ID namespace. Reinjection over the replacement Carrier retains the original Transmission ID.
+Replacement preserves Stream state, flow-control state, tombstones, retired Stream IDs, and the Session-wide Transmission-ID namespace. Reinjection over the replacement Carrier retains the original Transmission ID.
 
 ### J11. Simultaneous candidates
 
@@ -468,32 +467,22 @@ The Mandatory negative suite also verifies:
 - Session-scoped shutdown blocks new Streams and new Carrier JOINs across every Carrier;
 - Trigger Frame Type identifies the offending decoded Frame when one is known.
 
-## 16. Group M — Scheduler profiles
+## 16. Group M — Local Carrier-selection independence
 
-**Optional for Core interoperability.**
+**Recommended.**
 
-Core interoperability does not require two implementations to make identical scheduling decisions.
+Core interoperability does not require two implementations to expose, negotiate, or select the same scheduling mode.
 
-For each supported Scheduler ID, implementations SHOULD verify that:
+When test harnesses permit local Carrier-choice control, implementations SHOULD verify that:
 
-- implementations supporting WEIGHTED reproduce test-vectors/path-capacity.json;
-
-- the Scheduler value is negotiated correctly and remains Session-wide;
-- the scheduler never violates reliability or flow control;
+- A can prefer one eligible Carrier for its outbound Attempts while B independently prefers another;
+- neither endpoint requires a peer scheduler identifier;
 - a closing, superseded, or locally unusable Carrier is not selected for a new Attempt;
 - retransmission or reinjection preserves the Transmission ID;
-- AGGREGATE does not reserve all alternate Carriers exclusively for failure-only backup by definition;
-- PROTECT keeps alternate eligible Carriers available for protection or recovery even when ordinary traffic prefers another Carrier;
-- WEIGHTED requires both endpoints to send PATH_CAPACITY on every Carrier;
-- PATH_CAPACITY fields are interpreted from the advertising endpoint's transmit/receive perspective;
-- for Client-to-Server traffic, Client Transmit or Server Receive is non-zero, and for Server-to-Client traffic, Server Transmit or Client Receive is non-zero;
-- asymmetric and conflicting non-zero PATH_CAPACITY hints are accepted as independent authenticated hints rather than treated as a protocol conflict;
-- zero means no configured estimate from that endpoint for that direction;
-- configured capacity is scheduling input rather than flow-control credit, guaranteed throughput, or congestion-control permission;
-- AUTO does not require another implementation to make the same local policy switch or Carrier choice;
+- local policy changes do not alter Stream identity or flow-control accounting;
 - Carrier loss does not corrupt Stream semantics.
 
-Two conforming Core implementations are not required to make identical Carrier choices. Scheduler-specific deterministic test profiles can be published independently.
+Published metadata extensions, including the Carrier Receive Capacity Hint extension, are tested separately from the Core interoperability claim.
 
 ## 17. Group N — Resource behavior
 
@@ -517,7 +506,7 @@ A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
     Protocol Version: 4
-    Revision: Draft 06
+    Revision: Draft 07
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -539,12 +528,14 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 06 keeps Protocol Version 4 and preserves Draft 05 Frame encodings, Secure Record format, VarInt format, registry numeric assignments, MAX_CARRIERS encoding, and the mandatory cryptographic algorithms.
+Draft 07 keeps development Protocol Version 4 but intentionally changes the Core handshake from Draft 06.
 
-Draft 06 adds normative version-evolution rules in COMPATIBILITY.md and an explicit DORMANT Session state without adding a new wire value.
+Draft 07 removes the Draft 06 Core SCHEDULER Parameter (0x10), PATH_CAPACITY Parameter (0x11), SCHEDULER_MISMATCH Error Code (0x0b), and Core Scheduler-ID registry. Their Draft 06 numeric assignments are retained as Reserved historical values and are not reused by Core.
 
-Draft 06 changes the semantics and direction of the existing PATH_CAPACITY Parameter for WEIGHTED Sessions: both endpoints now advertise endpoint-relative Transmit and Receive capacity hints. AUTO, AGGREGATE, and PROTECT handshakes are wire-compatible with Draft 05 apart from specification-revision metadata. WEIGHTED interoperability requires both peers to implement the Draft 06 PATH_CAPACITY semantics.
+Because SCHEDULER was present in every Draft 06 CREATE/JOIN handshake, removing it changes CLIENT_INIT / SERVER_INIT transcript bytes. Draft 07 therefore publishes new key-schedule and Secure Record vectors even though HKDF, HMAC, AES-GCM, Frame encodings, and Secure Record syntax are unchanged.
 
-The key-schedule and Secure Record vectors use AGGREGATE and therefore retain the Draft 05 encoded handshake bytes and derived cryptographic values; only their specification revision metadata changes.
+Carrier selection in Draft 07 is endpoint-local policy. Two conforming Core peers do not negotiate scheduler modes and may use unrelated local policies for opposite sending directions.
 
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 06 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+Optional capacity signaling is no longer a Core concept. The published [Carrier Receive Capacity Hint extension](extensions/capacity-hint.md) allocates extension Parameter 0x40 with CRITICAL=0. A peer that does not implement that extension can safely ignore it and still interoperate at Core.
+
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 07 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

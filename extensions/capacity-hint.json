@@ -1,0 +1,100 @@
+{
+  "protocol": "MPX/4",
+  "core_revision": "Draft 07",
+  "extension": "Carrier Receive Capacity Hint",
+  "extension_revision": "01",
+  "parameter_type": "0x40",
+  "parameter_type_varint_hex": "4040",
+  "capacity_unit_bps": 100000,
+  "encoding_cases": [
+    {
+      "receive_capacity_units": "1",
+      "value_varint_hex": "01",
+      "parameter_hex": "4040000101"
+    },
+    {
+      "receive_capacity_units": "8",
+      "value_varint_hex": "08",
+      "parameter_hex": "4040000108"
+    },
+    {
+      "receive_capacity_units": "96",
+      "value_varint_hex": "4060",
+      "parameter_hex": "404000024060"
+    },
+    {
+      "receive_capacity_units": "500",
+      "value_varint_hex": "41f4",
+      "parameter_hex": "4040000241f4"
+    },
+    {
+      "receive_capacity_units": "65535",
+      "value_varint_hex": "8000ffff",
+      "parameter_hex": "404000048000ffff"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "name": "zero",
+      "receive_capacity_units": "0",
+      "expected": "PROTOCOL_VIOLATION_for_known_extension"
+    },
+    {
+      "name": "above-ceiling",
+      "receive_capacity_units": "65536",
+      "expected": "PROTOCOL_VIOLATION_for_known_extension"
+    },
+    {
+      "name": "critical-flag-set",
+      "receive_capacity_units": "96",
+      "flags": "0x01",
+      "expected": "PROTOCOL_VIOLATION_for_known_extension"
+    }
+  ],
+  "negotiation_cases": [
+    {
+      "name": "client-only-hint",
+      "client_hint_units": "500",
+      "server_hint": "omitted",
+      "core_handshake": "valid",
+      "extension_behavior": "server_may_use_client_hint"
+    },
+    {
+      "name": "server-only-hint",
+      "client_hint": "omitted",
+      "server_hint_units": "300",
+      "core_handshake": "valid",
+      "extension_behavior": "client_may_use_server_hint"
+    },
+    {
+      "name": "both-hints-differ",
+      "client_hint_units": "500",
+      "server_hint_units": "300",
+      "core_handshake": "valid",
+      "extension_behavior": "independent_hints_no_conflict"
+    },
+    {
+      "name": "both-omit",
+      "client_hint": "omitted",
+      "server_hint": "omitted",
+      "core_handshake": "valid",
+      "extension_behavior": "no_capacity_hint"
+    },
+    {
+      "name": "unknown-peer-ignores",
+      "sender_hint_units": "500",
+      "peer_support": "none",
+      "critical_flag": 0,
+      "core_handshake": "valid",
+      "extension_behavior": "peer_ignores_optional_parameter"
+    },
+    {
+      "name": "replacement-changes-hint",
+      "carrier_id": "7",
+      "generation_0_hint_units": "500",
+      "generation_1_hint_units": "350",
+      "core_handshake": "valid",
+      "extension_behavior": "carrier_scoped_hint_may_change"
+    }
+  ]
+}

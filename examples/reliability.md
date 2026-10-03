@@ -1,6 +1,6 @@
 # MPX/4 Retransmission and Reinjection Example
 
-This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 06.
+This document illustrates the distinction between a Transmission and an Attempt in MPX/4 Draft 07.
 
 ## 1. One logical Transmission
 
@@ -16,7 +16,7 @@ Transmission ID 7 identifies this reliable logical protocol unit for its entire 
 
 ## 2. First Attempt
 
-The Scheduler initially selects Carrier 1:
+The sender's local Carrier-selection policy initially selects Carrier 1:
 
     Transmission 7
         |
@@ -30,7 +30,7 @@ Attempt 1 has no separate wire identifier.
 
 Suppose Carrier 1 stops making progress before Transmission 7 is acknowledged.
 
-The Scheduler can create another Attempt on Carrier 2:
+The sender can create another Attempt on Carrier 2 according to its local Carrier-selection policy:
 
     Transmission 7
         |
@@ -76,4 +76,4 @@ An acknowledgement is most useful for path measurement when:
 - the Transmission has only one Attempt; and
 - the acknowledgement returns on the same Carrier.
 
-Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 06 does not treat it as an unambiguous per-Carrier delivery-rate sample.
+Once a Transmission has multiple Attempts, the acknowledgement still settles reliability but Draft 07 does not treat it as an unambiguous per-Carrier delivery-rate sample.

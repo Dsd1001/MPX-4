@@ -13,7 +13,7 @@ Describe the protocol or editorial change.
 
 ## Protocol impact
 
-Identify affected Sections, Frames, Parameters, Error Codes, Scheduler IDs, or transport bindings.
+Identify affected Sections, Frames, Parameters, Error Codes, extension assignments, or transport bindings.
 
 ## Interoperability
 

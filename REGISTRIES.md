@@ -1,9 +1,9 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 06
+**Registry Revision:** Draft 07
 
-This document records numeric assignments used by the MPX/4 Core Protocol.
+This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
 This file is the current registry snapshot for development Protocol Version 4. Draft revisions may still make explicitly documented incompatible changes. Once Protocol Version 4 is declared stable, assignments and incompatible semantic changes are governed by [COMPATIBILITY.md](COMPATIBILITY.md).
 
@@ -51,10 +51,11 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x09 | MAX_STREAMS | VarInt | Both / receive limit | Core |
 | 0x0a | MAX_CARRIERS | VarInt | Both / Session capability | Core |
 | 0x0b–0x0f | — | — | — | Core-reserved |
-| 0x10 | SCHEDULER | VarInt | Both / Session | Core |
-| 0x11 | PATH_CAPACITY | two VarInts | Both / Carrier scheduling hints | Core |
+| 0x10 | — | — | — | Reserved (retired Draft 06 SCHEDULER) |
+| 0x11 | — | — | — | Reserved (retired Draft 06 PATH_CAPACITY) |
 | 0x12–0x3f | — | — | — | Core-reserved |
-| 0x40–0x3fff | — | Extension-defined | — | Extension |
+| 0x40 | RECEIVE_CAPACITY_HINT | VarInt | Both / Carrier | Extension: Carrier Receive Capacity Hint |
+| 0x41–0x3fff | — | Extension-defined | — | Extension |
 | 0x4000–0x7fff | — | Private-profile-defined | — | Private Use |
 | 0x8000–2^62-1 | — | — | — | Reserved |
 
@@ -108,7 +109,7 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x08 | STREAM_LIMIT | Maximum active Stream count exceeded | Stream opening |
 | 0x09 | FLOW_CONTROL_ERROR | Peer exceeded advertised credit | Session |
 | 0x0a | FRAME_ENCODING_ERROR | Malformed Frame encoding | Carrier |
-| 0x0b | SCHEDULER_MISMATCH | Scheduler policy incompatible | Pre-establishment Carrier |
+| 0x0b | — | — | Reserved (retired Draft 06 SCHEDULER_MISMATCH) |
 | 0x0c | CARRIER_CONFLICT | Carrier ID or Generation conflict | Pre-establishment Carrier |
 | 0x0d | UNSUPPORTED_PARAMETER | Unknown critical Parameter | Pre-establishment Carrier |
 | 0x0e | STREAM_STATE_ERROR | Frame is impossible in the current Stream lifecycle state | Session, except explicit STREAM_OPEN rejection cases |
@@ -123,27 +124,14 @@ Failure scope is part of the Error Code semantics. The complete required actions
 
 AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close an unauthenticated Carrier without sending a wire error before ESTABLISHED.
 
-## 6. Scheduler IDs
-
-| Value | Name | Description |
-|---:|---|---|
-| 0x00 | AUTO | Implementation selects an operating policy from observed path state |
-| 0x01 | AGGREGATE | Concurrently uses eligible Carriers |
-| 0x02 | PROTECT | Uses a preferred Carrier with alternate Carrier protection |
-| 0x03 | WEIGHTED | Uses configured path capacity together with live path signals |
-| 0x04–0x3f | — | Core-reserved |
-| 0x40–0x3fff | — | Extension |
-| 0x4000–0x7fff | — | Private Use |
-| 0x8000–2^62-1 | — | Reserved |
-
-## 7. Parameter Flags
+## 6. Parameter Flags
 
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 06 |
+| 1–7 | RESERVED | MUST be zero in Draft 07 |
 
-## 8. Registry stability
+## 7. Registry stability
 
 Within a stable MPX/4 Protocol Version, an assigned numeric value MUST NOT be reassigned to a different semantic meaning.
 

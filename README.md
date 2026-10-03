@@ -7,14 +7,14 @@ It provides:
 - authenticated multi-Carrier Sessions;
 - reliable ordered bidirectional Streams;
 - Stream and Session flow control;
-- Carrier-aware scheduling;
+- independent per-endpoint Carrier selection;
 - retransmission and cross-Carrier reinjection;
 - extensible typed Frames and negotiated protocol Parameters.
 
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 06
+**Specification revision:** Draft 07
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
@@ -50,7 +50,7 @@ It provides:
 
 The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when an outstanding Transmission is retransmitted or reinjected across different Carriers.
 
-Draft 06 also distinguishes an ACTIVE Session from a retained zero-Carrier DORMANT Session, freezes an immutable Session Protocol Version across JOIN/replacement, and defines WEIGHTED path capacity as symmetric authenticated scheduling hints rather than Client-owned path truth.
+Draft 07 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
 
 ## Interoperability material
 
@@ -75,14 +75,14 @@ Draft 06 also distinguishes an ACTIVE Session from a retained zero-Carrier DORMA
 - [MAX_CARRIERS negotiation and active-count cases](test-vectors/max-carriers.json)
 - [Session lifecycle and DORMANT cases](test-vectors/session-lifecycle.json)
 - [Protocol Version compatibility cases](test-vectors/version-compatibility.json)
-- [PATH_CAPACITY scheduling-hint cases](test-vectors/path-capacity.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
-Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, PATH_CAPACITY semantics, and failure scope.
+Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, local Carrier-selection invariants, and failure scope.
 
 ## Extension points
 
 - [Protocol extensions](extensions/README.md)
+- [Carrier Receive Capacity Hint extension](extensions/capacity-hint.md)
 - [Transport bindings](bindings/README.md)
 
 Extensions are expected to define negotiation, scope, registry assignments, state transitions, error handling, interoperability behavior, and security considerations.
@@ -95,7 +95,7 @@ MPX/4 maintains explicit registries for:
 - Handshake Parameter Types;
 - Frame Types;
 - Error Codes;
-- Scheduler IDs.
+- published extension assignments.
 
 Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
@@ -125,7 +125,9 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── README.md
     │   └── tcp.md
     ├── extensions/
-    │   └── README.md
+    │   ├── README.md
+    │   ├── capacity-hint.md
+    │   └── capacity-hint.json
     ├── examples/
     │   ├── handshake.md
     │   ├── frames.md
@@ -144,7 +146,6 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── max-carriers.json
     │   ├── session-lifecycle.json
     │   ├── version-compatibility.json
-    │   ├── path-capacity.json
     │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/

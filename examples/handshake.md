@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 06 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 07 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -67,14 +67,12 @@ Illustrative logical Parameters, shown in mandatory increasing Parameter-Type or
       = 96
       CRITICAL = 1
 
-    SCHEDULER
-      = AGGREGATE
 
 MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are Client receive limits. They constrain traffic sent by the Server.
 
 MAX_CARRIERS is not a directional receive limit. It advertises that the Client is willing to maintain at most 96 simultaneously active logical Carriers in this Session.
 
-If SCHEDULER were WEIGHTED, CLIENT_INIT would additionally contain PATH_CAPACITY for this Carrier, expressed as the Client's Transmit and Receive capacity hints.
+Optional extension Parameters may follow the Core Parameters. Core does not require a scheduler identifier or capacity metadata.
 
 ## 3. SERVER_INIT
 
@@ -96,12 +94,6 @@ The Server validates the requested Session policy and returns its own receive li
       = 128
       CRITICAL = 1
 
-    SCHEDULER
-      = AGGREGATE
-
-The Server echoes the accepted Session Scheduler.
-
-If SCHEDULER is WEIGHTED, SERVER_INIT also contains PATH_CAPACITY for this Carrier, expressed as the Server's Transmit and Receive capacity hints. The Client and Server advertisements are independent and are not required to match.
 
 The Server receive limits constrain traffic sent by the Client. The two endpoints are allowed to advertise different receive limits.
 
@@ -121,13 +113,13 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 06 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 07 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 06 derivation is defined in Section 10 of the Core specification.
+The exact Draft 07 derivation is defined in Section 10 of the Core specification.
 
 Because MAX_CARRIERS is part of CLIENT_INIT and SERVER_INIT, changing either advertisement changes the authenticated transcript and therefore changes Finished values and application traffic secrets.
 
@@ -174,10 +166,6 @@ A second Carrier joins the same Session with a fresh authenticated handshake:
       = 96
       CRITICAL = 1
 
-    SCHEDULER
-      = existing Session Scheduler
-
-If the Session Scheduler is WEIGHTED, both CLIENT_INIT and SERVER_INIT also carry fresh Carrier-scoped PATH_CAPACITY hints for this Carrier.
 
 The Server repeats its original MAX_CARRIERS value of 128 in SERVER_INIT. The Effective Carrier Limit remains 96; JOIN does not renegotiate it.
 
@@ -218,7 +206,7 @@ A later valid JOIN or replacement using Protocol Version 4 can return the Sessio
 
 If local retention policy discards the DORMANT Session before reconnection, a later JOIN receives SESSION_NOT_FOUND.
 
-## Draft 06 notes
+## Draft 07 notes
 
 Handshake Parameters are encoded in strictly increasing Parameter-Type order.
 
@@ -228,6 +216,6 @@ MAX_CARRIERS is a required critical Session capability. It controls active logic
 
 The Session Protocol Version is fixed by CREATE and is repeated implicitly by the Connection Preface of every JOIN/replacement Carrier.
 
-For WEIGHTED, PATH_CAPACITY is sent by both endpoints. Zero means that endpoint supplies no configured estimate for that direction; each Session direction must still have at least one non-zero applicable hint across the two advertisements.
+Carrier selection is local endpoint policy. An implementation may use optional published metadata extensions without making that local policy part of Core.
 
 No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.

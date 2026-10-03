@@ -1,12 +1,12 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 06",
+  "revision": "Draft 07",
   "document": "COMPATIBILITY.md",
   "protocol_version": 4,
   "cases": [
     {
       "name": "draft-revision-not-on-wire",
-      "draft_revision": "Draft 06",
+      "draft_revision": "Draft 07",
       "connection_preface_version": 4,
       "expected": "draft_revision_not_encoded"
     },

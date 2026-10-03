@@ -12,7 +12,7 @@ Contributions are welcome for:
 - ambiguous or contradictory normative language;
 - wire-format changes;
 - new Frame or Parameter definitions;
-- scheduler-profile specifications;
+- Carrier-selection metadata or policy-support extensions;
 - security analysis;
 - interoperability test vectors;
 - transport-binding specifications;
@@ -36,7 +36,7 @@ Normative changes SHOULD use RFC-style requirements language consistently.
 
 ## Registry allocation
 
-Do not select a permanent numeric value for a new Frame, Parameter, Error Code, or Scheduler ID without updating [REGISTRIES.md](REGISTRIES.md).
+Do not select a permanent numeric value for a new Frame, Parameter, Error Code, or published extension assignment without updating [REGISTRIES.md](REGISTRIES.md).
 
 New assignments SHOULD use the appropriate Extension range unless the change is part of the Core specification.
 
@@ -72,7 +72,7 @@ Changes to CARRIER_ID range, MAX_CARRIERS negotiation, or active logical Carrier
 
 Changes to Protocol Version, VERSION_NEGOTIATION, stable-version compatibility, or extension negotiation SHOULD update [COMPATIBILITY.md](COMPATIBILITY.md) and `test-vectors/version-compatibility.json`.
 
-Changes to PATH_CAPACITY semantics SHOULD update `test-vectors/path-capacity.json`.
+Changes to published extension metadata semantics SHOULD update that extension's own machine-readable vectors.
 
 Changes to Error Code scope or close behavior SHOULD update [ERROR-HANDLING.md](ERROR-HANDLING.md) and `test-vectors/error-scope.json`.
 

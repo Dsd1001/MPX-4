@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 06
+**Revision:** Draft 07
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -69,7 +69,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 06 does not define or reserve a well-known TCP port.
+MPX/4 Draft 07 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -188,7 +188,7 @@ Each TCP Carrier is governed by the congestion-control behavior of its underlyin
 
 MPX flow control and scheduling do not replace TCP congestion control.
 
-An MPX scheduler MUST treat a Carrier as one schedulable transport path even if the underlying platform exposes transport-specific congestion-control metrics.
+Core treats each authenticated Carrier as one eligible transport path. Local Carrier-selection policy may use transport-specific metrics but MUST preserve the Core Carrier identity and reliability rules.
 
 MPX does not require a particular TCP congestion-control algorithm.
 
@@ -226,7 +226,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 06.
+The exact deadline is local policy and is not negotiated by Draft 07.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
