@@ -14,12 +14,13 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 05
+**Specification revision:** Draft 06
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
 - [Normative State Machines and Frame Validity](STATE-MACHINES.md)
 - [Normative Error Handling and Failure Scope](ERROR-HANDLING.md)
+- [Normative Versioning and Compatibility](COMPATIBILITY.md)
 - [MPX/4 over TCP](bindings/tcp.md)
 - [Interoperability Profile](INTEROPERABILITY.md)
 - [Protocol Registries](REGISTRIES.md)
@@ -49,6 +50,8 @@ It provides:
 
 The core protocol separates Stream semantics from Carrier transport semantics. A Stream remains one ordered byte stream even when an outstanding Transmission is retransmitted or reinjected across different Carriers.
 
+Draft 06 also distinguishes an ACTIVE Session from a retained zero-Carrier DORMANT Session, freezes an immutable Session Protocol Version across JOIN/replacement, and defines WEIGHTED path capacity as symmetric authenticated scheduling hints rather than Client-owned path truth.
+
 ## Interoperability material
 
 ### Examples
@@ -70,9 +73,12 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [Carrier Generation cases](test-vectors/carrier-generation.json)
 - [Error-scope cases](test-vectors/error-scope.json)
 - [MAX_CARRIERS negotiation and active-count cases](test-vectors/max-carriers.json)
+- [Session lifecycle and DORMANT cases](test-vectors/session-lifecycle.json)
+- [Protocol Version compatibility cases](test-vectors/version-compatibility.json)
+- [PATH_CAPACITY scheduling-hint cases](test-vectors/path-capacity.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
-Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, and failure scope.
+Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, PATH_CAPACITY semantics, and failure scope.
 
 ## Extension points
 
@@ -108,6 +114,7 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     ├── SPECIFICATION.md
     ├── STATE-MACHINES.md
     ├── ERROR-HANDLING.md
+    ├── COMPATIBILITY.md
     ├── INTEROPERABILITY.md
     ├── REGISTRIES.md
     ├── SECURITY.md
@@ -135,6 +142,9 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── carrier-generation.json
     │   ├── error-scope.json
     │   ├── max-carriers.json
+    │   ├── session-lifecycle.json
+    │   ├── version-compatibility.json
+    │   ├── path-capacity.json
     │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/

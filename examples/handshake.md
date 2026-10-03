@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 05 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 06 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -74,7 +74,7 @@ MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are Client receive limits. T
 
 MAX_CARRIERS is not a directional receive limit. It advertises that the Client is willing to maintain at most 96 simultaneously active logical Carriers in this Session.
 
-If SCHEDULER were WEIGHTED, CLIENT_INIT would additionally contain PATH_CAPACITY for this Carrier.
+If SCHEDULER were WEIGHTED, CLIENT_INIT would additionally contain PATH_CAPACITY for this Carrier, expressed as the Client's Transmit and Receive capacity hints.
 
 ## 3. SERVER_INIT
 
@@ -101,6 +101,8 @@ The Server validates the requested Session policy and returns its own receive li
 
 The Server echoes the accepted Session Scheduler.
 
+If SCHEDULER is WEIGHTED, SERVER_INIT also contains PATH_CAPACITY for this Carrier, expressed as the Server's Transmit and Receive capacity hints. The Client and Server advertisements are independent and are not required to match.
+
 The Server receive limits constrain traffic sent by the Client. The two endpoints are allowed to advertise different receive limits.
 
 The Session establishes:
@@ -119,13 +121,13 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 05 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 06 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 05 derivation is defined in Section 10 of the Core specification.
+The exact Draft 06 derivation is defined in Section 10 of the Core specification.
 
 Because MAX_CARRIERS is part of CLIENT_INIT and SERVER_INIT, changing either advertisement changes the authenticated transcript and therefore changes Finished values and application traffic secrets.
 
@@ -175,6 +177,8 @@ A second Carrier joins the same Session with a fresh authenticated handshake:
     SCHEDULER
       = existing Session Scheduler
 
+If the Session Scheduler is WEIGHTED, both CLIENT_INIT and SERVER_INIT also carry fresh Carrier-scoped PATH_CAPACITY hints for this Carrier.
+
 The Server repeats its original MAX_CARRIERS value of 128 in SERVER_INIT. The Effective Carrier Limit remains 96; JOIN does not renegotiate it.
 
 Session-scoped receive-limit Parameters are also repeated for the new Carrier handshake.
@@ -201,12 +205,29 @@ Replacement of an already active Carrier ID does not consume an additional activ
 
 If Carrier 96 was already inactive, its replacement consumes one free active slot when it reaches ESTABLISHED. If the Session is already at the Effective Carrier Limit because another Carrier used the released capacity, the replacement candidate is rejected with RESOURCE_LIMIT until capacity becomes available.
 
-## Draft 05 notes
+## 8. Loss of the last Carrier
+
+If the Session has one active Carrier and that Carrier is lost without SESSION_CLOSE, an endpoint that retains the Session enters DORMANT:
+
+    Active Carrier Count = 0
+    Session state         = DORMANT
+
+Stream state, flow-control accounting, Carrier Generation history, and reliable Transmission state remain retained. No new Stream or DATA Transmission is created while DORMANT.
+
+A later valid JOIN or replacement using Protocol Version 4 can return the Session to ACTIVE. A JOIN using another Protocol Version cannot attach to this Session even when that other version is locally supported.
+
+If local retention policy discards the DORMANT Session before reconnection, a later JOIN receives SESSION_NOT_FOUND.
+
+## Draft 06 notes
 
 Handshake Parameters are encoded in strictly increasing Parameter-Type order.
 
 MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are directional receive limits.
 
 MAX_CARRIERS is a required critical Session capability. It controls active logical Carrier concurrency and does not bound CARRIER_ID values.
+
+The Session Protocol Version is fixed by CREATE and is repeated implicitly by the Connection Preface of every JOIN/replacement Carrier.
+
+For WEIGHTED, PATH_CAPACITY is sent by both endpoints. Zero means that endpoint supplies no configured estimate for that direction; each Session direction must still have at least one non-zero applicable hint across the two advertisements.
 
 No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.

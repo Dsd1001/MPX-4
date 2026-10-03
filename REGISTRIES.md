@@ -1,11 +1,11 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 05
+**Registry Revision:** Draft 06
 
 This document records numeric assignments used by the MPX/4 Core Protocol.
 
-Values assigned to Core semantics are stable within protocol version 4. Draft revisions may still make incompatible changes until MPX/4 is declared stable.
+This file is the current registry snapshot for development Protocol Version 4. Draft revisions may still make explicitly documented incompatible changes. Once Protocol Version 4 is declared stable, assignments and incompatible semantic changes are governed by [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## 1. Allocation ranges
 
@@ -52,7 +52,7 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x0a | MAX_CARRIERS | VarInt | Both / Session capability | Core |
 | 0x0b–0x0f | — | — | — | Core-reserved |
 | 0x10 | SCHEDULER | VarInt | Both / Session | Core |
-| 0x11 | PATH_CAPACITY | two VarInts | Client / Carrier | Core |
+| 0x11 | PATH_CAPACITY | two VarInts | Both / Carrier scheduling hints | Core |
 | 0x12–0x3f | — | — | — | Core-reserved |
 | 0x40–0x3fff | — | Extension-defined | — | Extension |
 | 0x4000–0x7fff | — | Private-profile-defined | — | Private Use |
@@ -141,11 +141,13 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 05 |
+| 1–7 | RESERVED | MUST be zero in Draft 06 |
 
 ## 8. Registry stability
 
-Within a stable MPX/4 protocol revision, an assigned numeric value MUST NOT be reassigned to a different semantic meaning.
+Within a stable MPX/4 Protocol Version, an assigned numeric value MUST NOT be reassigned to a different semantic meaning.
+
+The normative versioning and registry-compatibility rules are defined in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 A Draft value removed before stability becomes Reserved unless the specification explicitly states otherwise.
 

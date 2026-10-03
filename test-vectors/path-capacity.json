@@ -1,0 +1,167 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 06",
+  "parameter": "PATH_CAPACITY",
+  "parameter_type": "0x11",
+  "unit_bits_per_second": 100000,
+  "field_perspective": "advertising_endpoint",
+  "fields": [
+    "transmit_capacity_units",
+    "receive_capacity_units"
+  ],
+  "encoding_cases": [
+    {
+      "transmit_capacity_units": "0",
+      "receive_capacity_units": "0",
+      "value_hex": "0000",
+      "parameter_hex": "1100020000"
+    },
+    {
+      "transmit_capacity_units": "300",
+      "receive_capacity_units": "500",
+      "value_hex": "412c41f4",
+      "parameter_hex": "110004412c41f4"
+    },
+    {
+      "transmit_capacity_units": "500",
+      "receive_capacity_units": "1000",
+      "value_hex": "41f443e8",
+      "parameter_hex": "11000441f443e8"
+    },
+    {
+      "transmit_capacity_units": "65535",
+      "receive_capacity_units": "65535",
+      "value_hex": "8000ffff8000ffff",
+      "parameter_hex": "1100088000ffff8000ffff"
+    }
+  ],
+  "pair_cases": [
+    {
+      "name": "client-only-directional-knowledge-remains-valid",
+      "client": {
+        "transmit_capacity_units": "300",
+        "receive_capacity_units": "500"
+      },
+      "server": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "0"
+      },
+      "client_to_server_hint_available": true,
+      "server_to_client_hint_available": true,
+      "expected": "valid"
+    },
+    {
+      "name": "split-knowledge-across-endpoints",
+      "client": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "500"
+      },
+      "server": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "300"
+      },
+      "client_to_server_hint_available": true,
+      "server_to_client_hint_available": true,
+      "expected": "valid"
+    },
+    {
+      "name": "conflicting-nonzero-hints-are-not-error",
+      "client": {
+        "transmit_capacity_units": "500",
+        "receive_capacity_units": "1000"
+      },
+      "server": {
+        "transmit_capacity_units": "800",
+        "receive_capacity_units": "300"
+      },
+      "expected": "valid_independent_hints"
+    },
+    {
+      "name": "missing-client-to-server-hint",
+      "client": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "500"
+      },
+      "server": {
+        "transmit_capacity_units": "700",
+        "receive_capacity_units": "0"
+      },
+      "client_to_server_hint_available": false,
+      "server_to_client_hint_available": true,
+      "expected": "SCHEDULER_MISMATCH"
+    },
+    {
+      "name": "missing-server-to-client-hint",
+      "client": {
+        "transmit_capacity_units": "500",
+        "receive_capacity_units": "0"
+      },
+      "server": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "700"
+      },
+      "client_to_server_hint_available": true,
+      "server_to_client_hint_available": false,
+      "expected": "SCHEDULER_MISMATCH"
+    },
+    {
+      "name": "both-directions-missing",
+      "client": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "0"
+      },
+      "server": {
+        "transmit_capacity_units": "0",
+        "receive_capacity_units": "0"
+      },
+      "expected": "SCHEDULER_MISMATCH"
+    }
+  ],
+  "presence_cases": [
+    {
+      "scheduler": "WEIGHTED",
+      "client_init_path_capacity": "present",
+      "server_init_path_capacity": "present",
+      "expected": "required"
+    },
+    {
+      "scheduler": "WEIGHTED",
+      "client_init_path_capacity": "missing",
+      "server_init_path_capacity": "present",
+      "expected": "SCHEDULER_MISMATCH"
+    },
+    {
+      "scheduler": "WEIGHTED",
+      "client_init_path_capacity": "present",
+      "server_init_path_capacity": "missing",
+      "expected": "SCHEDULER_MISMATCH"
+    },
+    {
+      "scheduler": "AGGREGATE",
+      "path_capacity": "present",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "scheduler": "AUTO",
+      "path_capacity": "present",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "scheduler": "PROTECT",
+      "path_capacity": "present",
+      "expected": "PROTOCOL_VIOLATION"
+    }
+  ],
+  "invalid_value_cases": [
+    {
+      "transmit_capacity_units": "65536",
+      "receive_capacity_units": "0",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "transmit_capacity_units": "0",
+      "receive_capacity_units": "65536",
+      "expected": "PROTOCOL_VIOLATION"
+    }
+  ]
+}

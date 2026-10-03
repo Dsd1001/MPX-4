@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 05",
+  "revision": "Draft 06",
   "direction": "client_to_server",
   "traffic_key_hex": "f58314ba277e3894f97c347ee3813e6d732bd5f15614df6c7d10eb8d58ee4e74",
   "traffic_iv_hex": "08683189ca0396f546adc383",

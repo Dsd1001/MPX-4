@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 05
+**Revision:** Draft 06
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -45,13 +45,17 @@ An MPX Session has the following abstract lifecycle:
     CREATING
        |
        v
-    ACTIVE
+    ACTIVE <------------------+
+       |                       |
+       | last Carrier gone     | Carrier established
+       v                       |
+    DORMANT -------------------+
        |
-       v
-    CLOSING
-       |
+       | retention ends or local Session teardown
        v
     CLOSED
+
+ACTIVE and DORMANT can also transition to CLOSING when SESSION_CLOSE is sent/received or a Session-scoped protocol error occurs. CLOSING transitions to CLOSED.
 
 ### 3.1. CREATING
 
@@ -61,9 +65,35 @@ Application Streams MUST NOT be created before the first Carrier reaches ESTABLI
 
 ### 3.2. ACTIVE
 
-At least one authenticated Carrier is or can become usable, and new Streams may be created subject to limits.
+At least one authenticated logical Carrier is ESTABLISHED and eligible for Session use.
 
-### 3.3. CLOSING
+New Streams may be created subject to limits.
+
+### 3.3. DORMANT
+
+DORMANT means the endpoint retains a valid Session while its Active Carrier Count is zero.
+
+An endpoint enters DORMANT when the last active logical Carrier leaves ESTABLISHED without SESSION_CLOSE and the endpoint chooses to retain the Session for reconnection.
+
+While DORMANT:
+
+- Session Protocol Version remains unchanged;
+- Stream IDs, opening state, terminal state, tombstones, and retired identities are retained;
+- Stream and Session flow-control accounting is retained;
+- Highest Accepted Generation for every used Carrier ID is retained;
+- outstanding and settled reliable Transmission state is retained;
+- no new Stream is created;
+- no new application DATA Transmission is created;
+- no new Transmission Attempt can be sent because no Carrier is eligible;
+- JOIN and valid Carrier replacement candidates MAY be accepted subject to normal handshake, Generation, and Effective Carrier Limit rules.
+
+When a Carrier reaches ESTABLISHED, the endpoint transitions DORMANT to ACTIVE before scheduling new Attempts. Outstanding reliable Transmissions then become eligible for normal retransmission or reinjection without changing their Transmission IDs or logical flow-control commitment.
+
+DORMANT retention duration is local policy. Draft 06 provides no negotiated minimum retention time. An endpoint MAY discard a DORMANT Session and transition directly to CLOSED. A later JOIN for discarded state is handled as SESSION_NOT_FOUND.
+
+The two endpoints may enter or leave DORMANT at different times because transport-loss detection and retention policy are local.
+
+### 3.4. CLOSING
 
 SESSION_CLOSE has been sent or received, or a Session-scoped protocol error has occurred.
 
@@ -71,7 +101,7 @@ No new Stream or Carrier may be created.
 
 Existing protocol state MAY be processed only as required to complete local shutdown.
 
-### 3.4. CLOSED
+### 3.5. CLOSED
 
 All Carrier transport state has been released.
 
@@ -228,9 +258,9 @@ The count changes as follows:
 | candidate for a previously unused Carrier ID reaches ESTABLISHED | +1 |
 | higher Generation replaces an already active Carrier ID | 0 |
 | higher Generation reactivates an inactive Carrier ID | +1 |
-| CARRIER_CLOSE moves current incarnation out of ESTABLISHED | -1 |
-| detected transport loss moves current incarnation out of ESTABLISHED | -1 |
-| SESSION_CLOSE closes Session Carriers | each active logical Carrier is removed |
+| CARRIER_CLOSE moves current incarnation out of ESTABLISHED | -1; if count reaches 0, Session becomes DORMANT when retained |
+| detected transport loss moves current incarnation out of ESTABLISHED | -1; if count reaches 0, Session becomes DORMANT when retained |
+| SESSION_CLOSE closes Session Carriers | each active logical Carrier is removed; Session goes through CLOSING, not DORMANT |
 | candidate handshake starts or fails | 0 |
 | lower Generation becomes SUPERSEDED during active replacement | no additional decrement |
 | historical Generation/tombstone state is retained | 0 |
@@ -258,6 +288,16 @@ Every JOIN carries both endpoints' original Session-scoped MAX_CARRIERS advertis
 If an endpoint receives a MAX_CARRIERS value different from the value that peer advertised during CREATE, the candidate JOIN fails with SESSION_CONFLICT and MUST NOT modify the existing Session.
 
 The Effective Carrier Limit is never renegotiated by JOIN or replacement.
+
+A JOIN accepted while the Session is DORMANT transitions the Session back to ACTIVE only when the candidate Carrier reaches ESTABLISHED. A failed candidate leaves the Session DORMANT.
+
+### 4.10. Session Protocol Version on JOIN
+
+CREATE records the Protocol Version of the first established Carrier as the immutable Session Protocol Version.
+
+Every JOIN or replacement candidate MUST use that same Protocol Version.
+
+If the candidate Protocol Version is unsupported, normal VERSION_NEGOTIATION applies before Session attachment. If the endpoint supports the candidate version but it differs from the identified Session Protocol Version, the candidate is rejected with SESSION_CONFLICT and the Session state is unchanged.
 
 ## 5. Stream opening states
 
@@ -308,7 +348,7 @@ While in OPENING, the Client MUST tolerate the following inbound Frames as **acc
 - RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
 
-Draft 05 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 06 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -611,7 +651,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 05 implementation MUST:
+A conforming Draft 06 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;
@@ -633,4 +673,8 @@ A conforming Draft 05 implementation MUST:
 - negotiate and retain the Effective Carrier Limit from MAX_CARRIERS;
 - count active logical Carriers by distinct current Carrier ID rather than numeric ID magnitude or transport-connection count;
 - reject a candidate with RESOURCE_LIMIT when committing it would exceed the Effective Carrier Limit;
-- release active Carrier capacity when a current Carrier closes or is declared lost without making its Carrier ID reusable as a new identity.
+- release active Carrier capacity when a current Carrier closes or is declared lost without making its Carrier ID reusable as a new identity;
+- represent retained zero-Carrier Session state as DORMANT;
+- prohibit new Stream creation and new DATA commitment while DORMANT;
+- preserve reliable Transmission and flow-control state across DORMANT-to-ACTIVE recovery;
+- enforce immutable Session Protocol Version across JOIN and replacement.

@@ -42,7 +42,7 @@ New assignments SHOULD use the appropriate Extension range unless the change is 
 
 Private experiments SHOULD use the Private Use range.
 
-Once a numeric value appears in a stable protocol revision, it SHOULD NOT be reassigned to an unrelated meaning.
+Once a numeric value appears in a stable Protocol Version, it MUST NOT be reassigned inconsistently with [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Extension design
 
@@ -58,17 +58,21 @@ An extension specification SHOULD state:
 - interaction with flow control, retransmission, and connection closure;
 - security and resource-consumption implications.
 
-Extensions MUST NOT silently reinterpret existing Core fields.
+Extensions MUST NOT silently reinterpret existing Core fields and MUST follow the negotiation and stable-version rules in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Test vectors
 
 Changes to wire encoding SHOULD include machine-readable test vectors when practical.
 
-Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD update [STATE-MACHINES.md](STATE-MACHINES.md) and `test-vectors/state-validity.json` when the affected behavior can be expressed as a conformance case.
+Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD update [STATE-MACHINES.md](STATE-MACHINES.md) and the relevant lifecycle vectors. Stream validity changes belong in `test-vectors/state-validity.json`; Session ACTIVE/DORMANT/CLOSED changes belong in `test-vectors/session-lifecycle.json`.
 
 Changes to Carrier Generation or replacement semantics SHOULD update `test-vectors/carrier-generation.json`.
 
 Changes to CARRIER_ID range, MAX_CARRIERS negotiation, or active logical Carrier accounting SHOULD update `test-vectors/max-carriers.json`.
+
+Changes to Protocol Version, VERSION_NEGOTIATION, stable-version compatibility, or extension negotiation SHOULD update [COMPATIBILITY.md](COMPATIBILITY.md) and `test-vectors/version-compatibility.json`.
+
+Changes to PATH_CAPACITY semantics SHOULD update `test-vectors/path-capacity.json`.
 
 Changes to Error Code scope or close behavior SHOULD update [ERROR-HANDLING.md](ERROR-HANDLING.md) and `test-vectors/error-scope.json`.
 
@@ -83,7 +87,7 @@ Test vectors SHOULD include both:
 
 Changes that alter the wire format or normative state machine should be recorded in [CHANGELOG.md](CHANGELOG.md).
 
-During draft development, incompatible changes are permitted but SHOULD be explicitly documented.
+During draft development, incompatible changes are permitted but SHOULD be explicitly documented. After a Protocol Version is declared stable, compatibility changes MUST follow [COMPATIBILITY.md](COMPATIBILITY.md).
 
 ## Pull requests
 

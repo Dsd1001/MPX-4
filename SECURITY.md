@@ -4,11 +4,11 @@
 
 This document describes security requirements and operational guidance for MPX/4 implementations.
 
-Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), and [ERROR-HANDLING.md](ERROR-HANDLING.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
+Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), [ERROR-HANDLING.md](ERROR-HANDLING.md), and [COMPATIBILITY.md](COMPATIBILITY.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 05 security profile
+## Draft 06 security profile
 
-The mandatory-to-implement Draft 05 profile uses:
+The mandatory-to-implement Draft 06 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -43,7 +43,7 @@ A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 05 profile does not provide forward secrecy.
+The mandatory Draft 06 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -58,7 +58,7 @@ Implementations MUST authenticate all Parameters that influence Session behavior
 - Session ID and action;
 - Carrier ID and Generation;
 - scheduler selection;
-- configured path capacity;
+- both endpoints' authenticated PATH_CAPACITY hints when WEIGHTED is used;
 - receive limits;
 - MAX_CARRIERS advertisements and therefore the Effective Carrier Limit;
 - fresh handshake nonces.
@@ -75,7 +75,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 05 uses a per-direction Record Sequence Number beginning at zero.
+Draft 06 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -83,7 +83,7 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 05 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 06 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -107,7 +107,7 @@ Retransmission and reinjection repeat the same Transmission ID. If the same Tran
 
 ## Stream-data integrity
 
-Draft 05 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 06 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -155,6 +155,30 @@ Implementations SHOULD impose explicit bounds on:
 
 Malformed input MUST NOT cause integer overflow, memory corruption, unbounded allocation, or process termination.
 
+## Version downgrade resistance
+
+VERSION_NEGOTIATION is unauthenticated and MUST NOT override local minimum-version or disabled-version policy.
+
+An endpoint MUST NOT respond to an authentication failure, Secure Record failure, or other post-preface failure by automatically retrying a lower Protocol Version.
+
+JOIN and replacement Carriers MUST use the immutable Session Protocol Version, preventing a lower-version Carrier from attaching to an already authenticated higher-version Session.
+
+## DORMANT Session retention
+
+A DORMANT Session intentionally retains authenticated Stream, flow-control, Generation, and reliable Transmission state while no Carrier is active.
+
+Implementations SHOULD bound DORMANT Session count and retention duration to resist memory-exhaustion attacks. Retention duration is local policy and is not a peer-controlled availability guarantee.
+
+Discarding a DORMANT Session MUST erase or retire its cryptographic and protocol state according to normal local teardown policy. A later JOIN for discarded state is rejected rather than reconstructing state from unauthenticated identifiers.
+
+## PATH_CAPACITY trust
+
+PATH_CAPACITY is authenticated but remains a scheduling hint, not a trusted measurement or resource reservation.
+
+An implementation MUST NOT use a peer-advertised capacity value to bypass congestion control, flow control, local resource policy, or Carrier usability checks.
+
+Conflicting local and peer capacity hints are not evidence of authentication failure or protocol corruption.
+
 ## Resource exhaustion
 
 Authentication does not eliminate denial-of-service risk.
@@ -188,11 +212,14 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 05 key derivation and Finished authentication;
-- Draft 05 Secure Record encryption;
+- Draft 06 key derivation and Finished authentication;
+- Draft 06 Secure Record encryption;
 - Stream state validity;
 - Carrier Generation replacement state;
 - MAX_CARRIERS negotiation and active Carrier accounting;
+- DORMANT Session lifecycle;
+- Protocol Version compatibility and cross-version Session isolation;
+- symmetric PATH_CAPACITY scheduling-hint semantics;
 - Error Code failure scope.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
@@ -227,7 +254,7 @@ State compaction MUST NOT refund or recreate Session credit.
 
 ## TCP binding security
 
-The Draft 05 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+The Draft 06 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
 
 Every TCP Carrier performs the full MPX authentication handshake.
 

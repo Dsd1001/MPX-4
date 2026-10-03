@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 05
+**Revision:** Draft 06
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 05 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 05 state rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 06 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 06 state rules, version-compatibility rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -43,7 +43,8 @@ A Core interoperability claim MUST NOT treat an INCONCLUSIVE Mandatory test as P
 
 An interoperability run SHOULD retain:
 
-- protocol revision;
+- Protocol Version;
+- specification revision;
 - implementation names and versions;
 - endpoint roles;
 - negotiated Parameters;
@@ -125,6 +126,16 @@ CREATE without MAX_CARRIERS in CLIENT_INIT or SERVER_INIT is rejected.
 ### B11. JOIN consistency
 
 On JOIN, both endpoints repeat their original CREATE-time MAX_CARRIERS values. Changing either advertisement produces SESSION_CONFLICT and leaves the established Session unchanged.
+
+### B12. Session Protocol Version
+
+Both implementations reproduce the relevant cases in test-vectors/version-compatibility.json.
+
+A Session created under Protocol Version 4 accepts only JOIN and replacement Carriers using Protocol Version 4. A candidate using another locally supported Protocol Version is rejected with SESSION_CONFLICT and the Session remains unchanged.
+
+### B13. VERSION_NEGOTIATION downgrade safety
+
+VERSION_NEGOTIATION is accepted only before CLIENT_INIT. A retry uses a fresh underlying connection and does not enable a locally disabled or below-minimum Protocol Version. Authentication failure is not interpreted as permission to retry with a lower version.
 
 ## 6. Group C — Single-Carrier Stream
 
@@ -384,6 +395,24 @@ Replacement preserves Stream state, flow-control state, Session Scheduler ID, to
 
 Two concurrent candidates using the same higher Generation cannot both become accepted incarnations. A later still-higher authenticated Generation can supersede a newly accepted lower Generation.
 
+### J12. Last-Carrier loss enters DORMANT
+
+Both implementations reproduce the relevant cases in test-vectors/session-lifecycle.json.
+
+A Session with one active Carrier and retained Session state loses that Carrier without SESSION_CLOSE. Active Carrier Count becomes zero and the endpoint enters DORMANT rather than destroying Stream, flow-control, Generation, or reliable Transmission state.
+
+### J13. No new work while DORMANT
+
+While DORMANT, the endpoint creates no new Stream and no new application DATA Transmission. Outstanding reliable Transmissions remain retained but no Attempt is sent because no Carrier is eligible.
+
+### J14. DORMANT recovery
+
+A valid JOIN or higher-Generation replacement reaches ESTABLISHED for a DORMANT Session. The endpoint transitions to ACTIVE and can retransmit or reinject previously outstanding Transmissions using their existing Transmission IDs and existing logical flow-control commitment.
+
+### J15. DORMANT retirement
+
+An endpoint discards a DORMANT Session according to local retention policy. A later JOIN for that Session is rejected as SESSION_NOT_FOUND. No negotiated minimum DORMANT retention time is assumed.
+
 ## 14. Group K — Close behavior
 
 **Mandatory.**
@@ -447,13 +476,20 @@ Core interoperability does not require two implementations to make identical sch
 
 For each supported Scheduler ID, implementations SHOULD verify that:
 
+- implementations supporting WEIGHTED reproduce test-vectors/path-capacity.json;
+
 - the Scheduler value is negotiated correctly and remains Session-wide;
 - the scheduler never violates reliability or flow control;
 - a closing, superseded, or locally unusable Carrier is not selected for a new Attempt;
 - retransmission or reinjection preserves the Transmission ID;
 - AGGREGATE does not reserve all alternate Carriers exclusively for failure-only backup by definition;
 - PROTECT keeps alternate eligible Carriers available for protection or recovery even when ordinary traffic prefers another Carrier;
-- WEIGHTED requires PATH_CAPACITY on every Carrier and treats configured capacity as scheduling input rather than flow-control credit;
+- WEIGHTED requires both endpoints to send PATH_CAPACITY on every Carrier;
+- PATH_CAPACITY fields are interpreted from the advertising endpoint's transmit/receive perspective;
+- for Client-to-Server traffic, Client Transmit or Server Receive is non-zero, and for Server-to-Client traffic, Server Transmit or Client Receive is non-zero;
+- asymmetric and conflicting non-zero PATH_CAPACITY hints are accepted as independent authenticated hints rather than treated as a protocol conflict;
+- zero means no configured estimate from that endpoint for that direction;
+- configured capacity is scheduling input rather than flow-control credit, guaranteed throughput, or congestion-control permission;
 - AUTO does not require another implementation to make the same local policy switch or Carrier choice;
 - Carrier loss does not corrupt Stream semantics.
 
@@ -480,7 +516,8 @@ Resource pressure must not create wire behavior that violates the Core protocol.
 A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
-    Revision: Draft 05
+    Protocol Version: 4
+    Revision: Draft 06
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -502,10 +539,12 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 05 preserves Draft 04 Frame encodings, Secure Record format, cryptographic derivations, and existing registry assignments, but adds one mandatory Core Handshake Parameter: MAX_CARRIERS (0x0a).
+Draft 06 keeps Protocol Version 4 and preserves Draft 05 Frame encodings, Secure Record format, VarInt format, registry numeric assignments, MAX_CARRIERS encoding, and the mandatory cryptographic algorithms.
 
-Draft 05 removes the fixed Carrier-ID range 1 through 8. CARRIER_ID now uses the full non-zero MPX VarInt range, while simultaneous active logical Carrier count is limited by the negotiated Effective Carrier Limit.
+Draft 06 adds normative version-evolution rules in COMPATIBILITY.md and an explicit DORMANT Session state without adding a new wire value.
 
-MAX_CARRIERS MUST be sent with CRITICAL=1. Draft 05 is therefore intentionally not CREATE/JOIN-handshake-compatible with a Draft 04 endpoint that does not understand MAX_CARRIERS: the older endpoint rejects the unknown critical Parameter instead of silently applying the obsolete fixed-eight rule.
+Draft 06 changes the semantics and direction of the existing PATH_CAPACITY Parameter for WEIGHTED Sessions: both endpoints now advertise endpoint-relative Transmit and Receive capacity hints. AUTO, AGGREGATE, and PROTECT handshakes are wire-compatible with Draft 05 apart from specification-revision metadata. WEIGHTED interoperability requires both peers to implement the Draft 06 PATH_CAPACITY semantics.
 
-Existing Draft 04 Frame, Secure Record format, Stream, reliability, Generation, error-scope, and cryptographic algorithm logic can otherwise be retained. However, Finished values, traffic secrets, traffic keys, traffic IVs, and dependent Secure Record test vectors change because the authenticated CLIENT_INIT / SERVER_INIT transcript now contains MAX_CARRIERS.
+The key-schedule and Secure Record vectors use AGGREGATE and therefore retain the Draft 05 encoded handshake bytes and derived cryptographic values; only their specification revision metadata changes.
+
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 06 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.

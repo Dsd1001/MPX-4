@@ -1,0 +1,87 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 06",
+  "document": "COMPATIBILITY.md",
+  "protocol_version": 4,
+  "cases": [
+    {
+      "name": "draft-revision-not-on-wire",
+      "draft_revision": "Draft 06",
+      "connection_preface_version": 4,
+      "expected": "draft_revision_not_encoded"
+    },
+    {
+      "name": "create-binds-session-version",
+      "operation": "CREATE",
+      "connection_preface_version": 4,
+      "expected_session_protocol_version": 4
+    },
+    {
+      "name": "same-version-join",
+      "session_protocol_version": 4,
+      "candidate_protocol_version": 4,
+      "operation": "JOIN",
+      "expected": "version_match"
+    },
+    {
+      "name": "supported-cross-version-join",
+      "locally_supported_versions": [5, 4],
+      "session_protocol_version": 4,
+      "candidate_protocol_version": 5,
+      "operation": "JOIN",
+      "expected": "reject_candidate",
+      "error": "SESSION_CONFLICT",
+      "session_modified": false
+    },
+    {
+      "name": "unsupported-preface-version",
+      "locally_supported_versions": [4],
+      "candidate_protocol_version": 5,
+      "expected": "VERSION_NEGOTIATION_or_close",
+      "session_attachment": false
+    },
+    {
+      "name": "version-negotiation-before-client-init",
+      "phase": "after_preface_before_client_init",
+      "message": "VERSION_NEGOTIATION",
+      "expected": "permitted"
+    },
+    {
+      "name": "version-negotiation-after-client-init",
+      "phase": "after_client_init",
+      "message": "VERSION_NEGOTIATION",
+      "expected": "reject_candidate"
+    },
+    {
+      "name": "downgrade-does-not-enable-disabled-version",
+      "locally_enabled_versions": [4],
+      "version_negotiation_list": [5, 4, 3],
+      "expected_retry_versions": [4]
+    },
+    {
+      "name": "downgrade-respects-minimum",
+      "locally_supported_versions": [5, 4, 3],
+      "minimum_acceptable_version": 4,
+      "version_negotiation_list": [3],
+      "expected": "no_retry_below_minimum"
+    },
+    {
+      "name": "authentication-failure-does-not-trigger-downgrade",
+      "attempted_protocol_version": 4,
+      "failure": "AUTHENTICATION_FAILED",
+      "expected": "no_automatic_lower_version_retry"
+    },
+    {
+      "name": "stable-version-new-mandatory-core-parameter",
+      "version_state": "stable",
+      "change": "new_unconditionally_mandatory_core_parameter",
+      "expected": "new_protocol_version_required"
+    },
+    {
+      "name": "stable-version-optional-negotiated-extension",
+      "version_state": "stable",
+      "change": "new_optional_explicitly_negotiated_extension",
+      "expected": "same_protocol_version_permitted"
+    }
+  ]
+}

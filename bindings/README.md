@@ -4,7 +4,7 @@ MPX/4 separates the Core protocol from the transport used by each Carrier.
 
 ## Normative baseline
 
-- [MPX/4 over TCP](tcp.md) — Draft 05 baseline transport binding.
+- [MPX/4 over TCP](tcp.md) — Draft 06 baseline transport binding.
 
 The TCP binding defines connection establishment, byte-stream parsing, Secure Record mapping, transport loss, Carrier replacement, graceful close, TCP half-close behavior, and operational interaction with TCP.
 
@@ -25,4 +25,4 @@ A transport-binding specification should define:
 - operational and security considerations;
 - conformance and interoperability tests.
 
-A new binding MUST preserve the Session, Stream, Transmission, and Frame semantics defined by the Core protocol.
+A new binding MUST preserve the Session Protocol Version, ACTIVE/DORMANT lifecycle, Carrier, Stream, Transmission, and Frame semantics defined by the Core protocol.

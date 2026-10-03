@@ -4,6 +4,51 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
 
+## Draft 06 — 2026-10-04
+
+Draft 06 is a stabilization revision focused on long-term protocol evolution, retained zero-Carrier Sessions, and implementation-neutral WEIGHTED capacity semantics.
+
+### Added
+
+- Normative [COMPATIBILITY.md](COMPATIBILITY.md) separating on-wire Protocol Version from draft specification revision.
+- Immutable Session Protocol Version established by CREATE and enforced on every JOIN/replacement Carrier.
+- Explicit stable-version rules defining which future changes require a new Protocol Version versus an optional negotiated extension.
+- VERSION_NEGOTIATION downgrade-safety rules, including fresh-connection retry and local minimum-version enforcement.
+- DORMANT Session lifecycle for retained Sessions with Active Carrier Count zero.
+- DORMANT recovery rules preserving Stream, flow-control, Generation, tombstone, retired-identity, and reliable Transmission state.
+- Machine-readable [session-lifecycle.json](test-vectors/session-lifecycle.json) cases.
+- Machine-readable [version-compatibility.json](test-vectors/version-compatibility.json) cases.
+- Machine-readable [path-capacity.json](test-vectors/path-capacity.json) encoding and WEIGHTED hint-availability cases.
+
+### Changed
+
+- PATH_CAPACITY remains Parameter Type `0x11` with the same two-VarInt wire shape, but its fields are now endpoint-relative `Transmit Capacity Units` and `Receive Capacity Units`.
+- Both Client and Server send PATH_CAPACITY for every WEIGHTED Carrier.
+- PATH_CAPACITY preserves the Draft 05 configured-value ceiling: zero means no configured estimate from that endpoint for that direction; non-zero values are `1 .. 65535` units.
+- WEIGHTED requires at least one applicable non-zero configured hint for each Session direction across the two endpoint advertisements.
+- Conflicting local and peer capacity hints are independent authenticated hints, not a protocol conflict and not a negotiated bandwidth guarantee.
+- Loss or graceful closure of the last active Carrier transitions a retained Session to DORMANT instead of leaving the zero-Carrier state ambiguously ACTIVE.
+- DORMANT Sessions prohibit new Stream creation and new application DATA commitment until a Carrier returns to ESTABLISHED.
+- A Session created under one Protocol Version cannot accept a JOIN/replacement Carrier using another Protocol Version, even when the endpoint supports both versions.
+
+### Clarified
+
+- Draft revision labels such as Draft 05 and Draft 06 are repository specification revisions and are not transmitted on the wire.
+- Protocol Version 4 remains a development version until an explicit stability declaration.
+- Once a Protocol Version is declared stable, adding a new unconditionally mandatory Core Parameter or changing mandatory Core semantics incompatibly requires a new Protocol Version.
+- Optional negotiated extensions can evolve without changing the Core Protocol Version when an unaware peer can safely ignore or reject them according to the extension contract.
+- VERSION_NEGOTIATION is unauthenticated and cannot override disabled-version or minimum-version policy.
+- Authentication or post-preface protocol failure is not a downgrade signal.
+- DORMANT retention duration is local implementation policy and is not a negotiated availability guarantee.
+
+### Compatibility
+
+Draft 06 keeps Protocol Version 4 and does not allocate a new Frame Type, Parameter Type, Error Code, or Scheduler ID.
+
+AUTO, AGGREGATE, and PROTECT handshakes preserve Draft 05 wire bytes and cryptographic derivations; the published key-schedule and Secure Record vectors therefore retain their Draft 05 byte values with only revision metadata updated.
+
+WEIGHTED semantics are intentionally tightened before Protocol Version 4 stability: a Draft 06 WEIGHTED peer expects PATH_CAPACITY from both endpoints and interprets its fields from the advertising endpoint's transmit/receive perspective. Draft 05 WEIGHTED behavior is therefore not the Draft 06 interoperability profile.
+
 ## Draft 05 — 2026-10-03
 
 Draft 05 decouples Carrier identity space from active Carrier concurrency. It removes the fixed eight-Carrier Core limit and introduces bilateral MAX_CARRIERS negotiation.

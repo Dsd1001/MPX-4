@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 05",
+  "revision": "Draft 06",
   "document": "STATE-MACHINES.md",
   "cases": [
     {

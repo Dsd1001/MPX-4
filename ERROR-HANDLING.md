@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 05
+**Revision:** Draft 06
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -51,7 +51,9 @@ A Carrier-scoped failure MUST NOT by itself:
 - clear Session-wide reliable Transmission state;
 - reset Stream or Session flow-control state;
 - invalidate another authenticated Carrier;
-- close the Session.
+- transition the Session to CLOSING.
+
+If a Carrier-scoped failure removes the last active Carrier and the endpoint retains the Session, the Session enters DORMANT rather than CLOSING.
 
 ### 2.3. Session scope
 
@@ -132,7 +134,7 @@ The protocol action depends on the resource being protected:
 - an established Carrier-specific resource limit: CARRIER_CLOSE;
 - a Session-wide resource condition under which shared state cannot safely continue: SESSION_CLOSE.
 
-General resource policy, memory sizing, queue sizing, handshake-admission policy, and eviction strategy remain local implementation choices. The explicit exception is active logical Carrier concurrency: MAX_CARRIERS is negotiated by Core and defines the immutable Effective Carrier Limit for the Session.
+General resource policy, memory sizing, queue sizing, handshake-admission policy, DORMANT retention duration, and eviction strategy remain local implementation choices. The explicit exception is active logical Carrier concurrency: MAX_CARRIERS is negotiated by Core and defines the immutable Effective Carrier Limit for the Session.
 
 ## 5. Error selection precedence
 
@@ -179,7 +181,7 @@ Other authenticated Carriers in the same Session remain valid unless a separate 
 The following failures reject only the candidate Carrier:
 
 - SESSION_NOT_FOUND;
-- SESSION_CONFLICT;
+- SESSION_CONFLICT, including JOIN using a Protocol Version different from the immutable Session Protocol Version;
 - SCHEDULER_MISMATCH;
 - CARRIER_CONFLICT;
 - UNSUPPORTED_PARAMETER;
@@ -191,6 +193,7 @@ A JOIN candidate that would make the endpoint's local Active Carrier Count excee
 
 A failed JOIN MUST NOT:
 
+- change the Session Protocol Version;
 - change either endpoint's stored MAX_CARRIERS advertisement or the Effective Carrier Limit;
 - advance the accepted Carrier Generation;
 - supersede an existing Carrier;

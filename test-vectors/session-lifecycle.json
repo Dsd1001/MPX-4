@@ -1,0 +1,119 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 06",
+  "document": "STATE-MACHINES.md",
+  "cases": [
+    {
+      "name": "first-carrier-establishes-active",
+      "before": "CREATING",
+      "event": "first_carrier_established",
+      "active_carrier_count_after": 1,
+      "after": "ACTIVE"
+    },
+    {
+      "name": "last-carrier-loss-retained",
+      "before": "ACTIVE",
+      "active_carrier_count_before": 1,
+      "event": "unexpected_carrier_loss",
+      "retain_session": true,
+      "active_carrier_count_after": 0,
+      "after": "DORMANT"
+    },
+    {
+      "name": "last-carrier-close-retained",
+      "before": "ACTIVE",
+      "active_carrier_count_before": 1,
+      "event": "CARRIER_CLOSE",
+      "retain_session": true,
+      "active_carrier_count_after": 0,
+      "after": "DORMANT"
+    },
+    {
+      "name": "last-carrier-loss-not-retained",
+      "before": "ACTIVE",
+      "active_carrier_count_before": 1,
+      "event": "unexpected_carrier_loss",
+      "retain_session": false,
+      "active_carrier_count_after": 0,
+      "after": "CLOSED"
+    },
+    {
+      "name": "dormant-preserves-state",
+      "state": "DORMANT",
+      "expected_preserved": [
+        "session_protocol_version",
+        "stream_state",
+        "stream_and_session_credit",
+        "carrier_generation_history",
+        "outstanding_transmissions",
+        "settled_transmission_identity",
+        "tombstones",
+        "retired_stream_ids"
+      ]
+    },
+    {
+      "name": "dormant-no-new-stream",
+      "state": "DORMANT",
+      "operation": "create_stream",
+      "expected": "forbidden_until_active"
+    },
+    {
+      "name": "dormant-no-new-data-commit",
+      "state": "DORMANT",
+      "operation": "create_new_application_data_transmission",
+      "expected": "forbidden_until_active"
+    },
+    {
+      "name": "dormant-no-attempt",
+      "state": "DORMANT",
+      "outstanding_transmission_id": 27,
+      "operation": "schedule_attempt",
+      "expected": "no_eligible_carrier"
+    },
+    {
+      "name": "dormant-join-handshaking",
+      "before": "DORMANT",
+      "event": "join_candidate_handshaking",
+      "after": "DORMANT"
+    },
+    {
+      "name": "dormant-failed-join",
+      "before": "DORMANT",
+      "event": "join_candidate_failed",
+      "after": "DORMANT"
+    },
+    {
+      "name": "dormant-recovery",
+      "before": "DORMANT",
+      "event": "join_or_replacement_established",
+      "active_carrier_count_after": 1,
+      "after": "ACTIVE"
+    },
+    {
+      "name": "dormant-reinjection-preserves-identity",
+      "before": "DORMANT",
+      "outstanding_transmission_id": 27,
+      "event": "replacement_established_then_reinject",
+      "expected_transmission_id": 27,
+      "additional_logical_credit": 0
+    },
+    {
+      "name": "dormant-retention-expiry",
+      "before": "DORMANT",
+      "event": "local_retention_ends",
+      "after": "CLOSED"
+    },
+    {
+      "name": "join-after-dormant-discard",
+      "state": "CLOSED",
+      "event": "JOIN_for_discarded_session",
+      "expected": "SESSION_NOT_FOUND"
+    },
+    {
+      "name": "session-close-is-not-dormant",
+      "before": "ACTIVE",
+      "event": "SESSION_CLOSE",
+      "expected_path": ["CLOSING", "CLOSED"]
+    }
+  ]
+}

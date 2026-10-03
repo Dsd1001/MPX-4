@@ -1,13 +1,13 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 05
+**Revision:** Draft 06
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
 This document defines the normative mapping of MPX/4 onto TCP.
 
-It is a transport binding for the MPX/4 Core Protocol and is read together with [../SPECIFICATION.md](../SPECIFICATION.md) and [../STATE-MACHINES.md](../STATE-MACHINES.md).
+It is a transport binding for the MPX/4 Core Protocol and is read together with [../SPECIFICATION.md](../SPECIFICATION.md), [../STATE-MACHINES.md](../STATE-MACHINES.md), and [../COMPATIBILITY.md](../COMPATIBILITY.md).
 
 ## 1. Scope
 
@@ -69,7 +69,7 @@ A TCP connection that is still performing the MPX handshake does not count towar
 
 ## 5. Port selection
 
-MPX/4 Draft 05 does not define or reserve a well-known TCP port.
+MPX/4 Draft 06 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -226,7 +226,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 05.
+The exact deadline is local policy and is not negotiated by Draft 06.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -265,9 +265,13 @@ The endpoint:
 
 1. marks the Carrier inactive;
 2. discards incomplete handshake or Secure Record parser state belonging to that TCP connection;
-3. preserves Session, Stream, flow-control, and reliable Transmission state;
-4. makes outstanding Transmissions eligible for normal retransmission or reinjection policy;
-5. MAY establish a replacement Carrier.
+3. preserves Session, Stream, flow-control, Generation, and reliable Transmission state;
+4. updates Active Carrier Count;
+5. if another Carrier remains active, makes outstanding Transmissions eligible for normal retransmission or reinjection policy;
+6. if no Carrier remains active and the Session is retained, enters DORMANT;
+7. MAY establish a replacement Carrier.
+
+While DORMANT, no TCP Carrier exists on which MPX Frames can be sent. A newly established JOIN/replacement transitions the Session to ACTIVE before outstanding Transmissions become eligible for new Attempts.
 
 ## 19. Partial record on transport loss
 
@@ -286,7 +290,7 @@ Carrier Generation acceptance is a Core Session state machine defined in SPECIFI
 To attempt replacement of a failed or retired logical Carrier over TCP:
 
 1. establish a new TCP connection;
-2. send a new MPX Connection Preface;
+2. send a new MPX Connection Preface using the Session Protocol Version;
 3. perform a complete JOIN handshake;
 4. use the same CARRIER_ID;
 5. use a CARRIER_GENERATION strictly greater than the Highest Accepted Generation for that ID;
@@ -298,7 +302,7 @@ The candidate TCP connection does not become the current Carrier merely by conne
 
 The new TCP connection never resumes the old Carrier cryptographic record stream.
 
-A failed replacement handshake is discarded without changing the current Generation, Active Carrier Count, Effective Carrier Limit, or existing Session state.
+A failed replacement handshake is discarded without changing the Session Protocol Version, current Generation, Active Carrier Count, Effective Carrier Limit, or existing Session state.
 
 If the candidate would reactivate an inactive logical Carrier while the Session is already at its Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT before Generation commit.
 
@@ -347,6 +351,8 @@ After receiving a valid CARRIER_CLOSE:
 
 - the peer marks that Carrier closing;
 - it stops scheduling new Attempts on that Carrier;
+- it updates Active Carrier Count;
+- if this was the last active Carrier and the Session is retained, it enters DORMANT;
 - it MAY close the TCP connection immediately after processing already authenticated preceding bytes.
 
 TCP FIN is transport cleanup, not the protocol-level Carrier-close signal.

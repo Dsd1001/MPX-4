@@ -15,6 +15,6 @@ An extension should define:
 - security considerations;
 - interoperability examples or test vectors.
 
-Extensions MUST NOT silently reinterpret existing Core fields.
+Extensions MUST NOT silently reinterpret existing Core fields. Extension negotiation and same-version compatibility MUST follow [../COMPATIBILITY.md](../COMPATIBILITY.md).
 
 Potential extension areas include datagrams, ephemeral key exchange, forward error correction, additional scheduler profiles, and path-management capabilities.
