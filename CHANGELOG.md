@@ -2,7 +2,7 @@
 
 All notable MPX/4 specification changes are recorded here.
 
-MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
+MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
 
 ## Draft 06 — 2026-10-04
 
