@@ -1,6 +1,6 @@
 # MPX/4 Handshake Example
 
-This document provides a non-normative walkthrough of an MPX/4 Draft 04 Session establishment.
+This document provides a non-normative walkthrough of an MPX/4 Draft 05 Session establishment.
 
 The normative handshake requirements are defined in [../SPECIFICATION.md](../SPECIFICATION.md).
 
@@ -63,16 +63,22 @@ Illustrative logical Parameters, shown in mandatory increasing Parameter-Type or
     MAX_STREAMS
       = 2048
 
+    MAX_CARRIERS
+      = 96
+      CRITICAL = 1
+
     SCHEDULER
       = AGGREGATE
 
 MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are Client receive limits. They constrain traffic sent by the Server.
 
+MAX_CARRIERS is not a directional receive limit. It advertises that the Client is willing to maintain at most 96 simultaneously active logical Carriers in this Session.
+
 If SCHEDULER were WEIGHTED, CLIENT_INIT would additionally contain PATH_CAPACITY for this Carrier.
 
 ## 3. SERVER_INIT
 
-The Server validates the requested Session policy and returns its own receive limits:
+The Server validates the requested Session policy and returns its own receive limits and Carrier capability:
 
     SERVER_NONCE
       = 32 fresh random octets
@@ -86,12 +92,22 @@ The Server validates the requested Session policy and returns its own receive li
     MAX_STREAMS
       = 2048
 
+    MAX_CARRIERS
+      = 128
+      CRITICAL = 1
+
     SCHEDULER
       = AGGREGATE
 
 The Server echoes the accepted Session Scheduler.
 
 The Server receive limits constrain traffic sent by the Client. The two endpoints are allowed to advertise different receive limits.
+
+The Session establishes:
+
+    Effective Carrier Limit = min(96, 128) = 96
+
+The numeric Carrier ID space is independent of this concurrency limit. A later Carrier can legally use Carrier ID 4000000000 while the Session still contains only a small number of active logical Carriers.
 
 ## 4. Finished authentication
 
@@ -103,13 +119,15 @@ The exact encoded bytes of:
 
 produce transcript hash H0.
 
-CLIENT_FINISHED contains the Draft 04 HMAC-SHA256 VerifyData over H0.
+CLIENT_FINISHED contains the Draft 05 HMAC-SHA256 VerifyData over H0.
 
 SERVER_FINISHED authenticates the transcript including CLIENT_FINISHED.
 
 After both required Finished checks succeed, the endpoints derive the directional application traffic key and IV values used by Secure Records.
 
-The exact Draft 04 derivation is defined in Section 10 of the Core specification.
+The exact Draft 05 derivation is defined in Section 10 of the Core specification.
+
+Because MAX_CARRIERS is part of CLIENT_INIT and SERVER_INIT, changing either advertisement changes the authenticated transcript and therefore changes Finished values and application traffic secrets.
 
 A complete machine-readable example is available in:
 
@@ -142,7 +160,7 @@ A second Carrier joins the same Session with a fresh authenticated handshake:
       = JOIN
 
     CARRIER_ID
-      = 2
+      = 96
 
     CARRIER_GENERATION
       = 0
@@ -150,28 +168,45 @@ A second Carrier joins the same Session with a fresh authenticated handshake:
     CLIENT_NONCE
       = new 32-octet random value
 
+    MAX_CARRIERS
+      = 96
+      CRITICAL = 1
+
     SCHEDULER
       = existing Session Scheduler
 
-Receive-limit Parameters are also sent for the new Carrier handshake.
+The Server repeats its original MAX_CARRIERS value of 128 in SERVER_INIT. The Effective Carrier Limit remains 96; JOIN does not renegotiate it.
+
+Session-scoped receive-limit Parameters are also repeated for the new Carrier handshake.
+
+Carrier ID 96 does not imply that 96 Carriers exist. It is only the identity of this logical Carrier.
 
 The Carrier is not eligible for scheduling until CLIENT_FINISHED has authenticated the Client and the full handshake reaches ESTABLISHED.
 
 ## 7. Carrier reconnection
 
-If Carrier 2 later disconnects and is re-established:
+If Carrier 96 later disconnects and is re-established:
 
     CARRIER_ID
-      = 2
+      = 96
 
     CARRIER_GENERATION
       = 1
 
 The higher Generation distinguishes the new transport instance from stale state belonging to the previous Carrier incarnation.
 
-A lower Generation is stale. A conflicting equal live Generation is rejected.
+A lower Generation is stale. An equal Generation is rejected even if the previous transport has already closed or been lost.
 
+Replacement of an already active Carrier ID does not consume an additional active logical Carrier slot.
 
-## Draft 04 notes
+If Carrier 96 was already inactive, its replacement consumes one free active slot when it reaches ESTABLISHED. If the Session is already at the Effective Carrier Limit because another Carrier used the released capacity, the replacement candidate is rejected with RESOURCE_LIMIT until capacity becomes available.
 
-Handshake Parameters are encoded in strictly increasing Parameter-Type order. MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are directional receive limits. No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.
+## Draft 05 notes
+
+Handshake Parameters are encoded in strictly increasing Parameter-Type order.
+
+MAX_FRAME_PAYLOAD, MAX_RECORD_SIZE, and MAX_STREAMS are directional receive limits.
+
+MAX_CARRIERS is a required critical Session capability. It controls active logical Carrier concurrency and does not bound CARRIER_ID values.
+
+No application-data credit is implicit; Stream and Session credit are advertised explicitly with Frames after authentication.

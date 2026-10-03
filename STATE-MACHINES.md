@@ -1,7 +1,7 @@
 # MPX/4 State Machines and Frame Validity
 
 **Document:** MPX/4 State Machine Supplement  
-**Revision:** Draft 04
+**Revision:** Draft 05
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -158,15 +158,18 @@ Equal Generation is a conflict even when the previously accepted transport is al
 
 ### 4.5. Replacement commit
 
-When a candidate with G' > G reaches ESTABLISHED, the Generation advance is committed at that endpoint as one Session-state transition:
+When a candidate with G' > G is otherwise ready to reach ESTABLISHED, the endpoint first evaluates the Active Carrier Count rule in Section 4.8. If committing the candidate would exceed the Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT and the Generation advance does not occur.
+
+Otherwise, the Generation advance is committed at that endpoint as one Session-state transition:
 
 1. Highest Accepted Generation becomes G';
 2. the new incarnation becomes CURRENT(G');
 3. every lower Generation of that Carrier ID becomes SUPERSEDED;
-4. no new Transmission Attempt may be scheduled on a superseded incarnation;
-5. no new path-measurement sample may be attributed to a superseded incarnation;
-6. subsequently received Secure Records from a superseded incarnation MUST NOT create new protocol state;
-7. the transport of a superseded incarnation SHOULD be closed promptly.
+4. the Active Carrier Count is updated according to Section 4.8;
+5. no new Transmission Attempt may be scheduled on a superseded incarnation;
+6. no new path-measurement sample may be attributed to a superseded incarnation;
+7. subsequently received Secure Records from a superseded incarnation MUST NOT create new protocol state;
+8. the transport of a superseded incarnation SHOULD be closed promptly.
 
 Frames from a lower Generation that were completely authenticated and processed before the commit keep their already-applied effects.
 
@@ -202,6 +205,59 @@ The replacement Carrier has new handshake nonces, new traffic secrets, new traff
 Outstanding reliable Transmissions remain eligible for normal retransmission or reinjection and retain their Transmission IDs.
 
 Generation values never wrap. If the Highest Accepted Generation is 2^62 - 1, that Carrier ID has no further valid replacement Generation in the Session.
+
+### 4.8. Active logical Carrier count
+
+Each endpoint maintains a local Active Carrier Count for the Session.
+
+The Session also stores:
+
+    Client Carrier Limit
+    Server Carrier Limit
+    Effective Carrier Limit = min(Client Carrier Limit, Server Carrier Limit)
+
+All three values are established during CREATE and are immutable for the Session lifetime.
+
+The Active Carrier Count is the number of distinct Carrier IDs whose current accepted incarnation is ESTABLISHED and eligible for Session use at that endpoint.
+
+The count changes as follows:
+
+| Event | Active Carrier Count change |
+|---|---:|
+| first Session Carrier reaches ESTABLISHED | +1 |
+| candidate for a previously unused Carrier ID reaches ESTABLISHED | +1 |
+| higher Generation replaces an already active Carrier ID | 0 |
+| higher Generation reactivates an inactive Carrier ID | +1 |
+| CARRIER_CLOSE moves current incarnation out of ESTABLISHED | -1 |
+| detected transport loss moves current incarnation out of ESTABLISHED | -1 |
+| SESSION_CLOSE closes Session Carriers | each active logical Carrier is removed |
+| candidate handshake starts or fails | 0 |
+| lower Generation becomes SUPERSEDED during active replacement | no additional decrement |
+| historical Generation/tombstone state is retained | 0 |
+
+A decrement occurs at most once for one active logical Carrier transition. Superseding an active old Generation at the same commit that activates its replacement is one logical replacement and therefore has net count change 0.
+
+Before committing any candidate that would add one active logical Carrier, the endpoint evaluates:
+
+    Active Carrier Count + 1 <= Effective Carrier Limit
+
+If false, the candidate is rejected with RESOURCE_LIMIT. Highest Accepted Generation, Stream state, flow-control state, and all other established Session state remain unchanged.
+
+A candidate for the same Carrier ID as an already active logical Carrier does not require an additional slot when a higher Generation is committed.
+
+A Carrier ID whose current incarnation has already closed or been declared lost does not reserve an active slot. If another Carrier ID consumes the freed capacity before that logical Carrier is replaced, its later replacement can be rejected with RESOURCE_LIMIT until capacity becomes available again.
+
+HANDSHAKING candidates do not count toward MAX_CARRIERS. Implementations MAY apply separate local limits to simultaneous handshakes or transport resources; those limits are implementation policy and do not change the Effective Carrier Limit.
+
+Carrier ID magnitude is irrelevant to this state machine. For example, Carrier IDs 1 and 4000000000 represent two logical Carriers, not four billion Carriers.
+
+### 4.9. MAX_CARRIERS consistency on JOIN
+
+Every JOIN carries both endpoints' original Session-scoped MAX_CARRIERS advertisements through CLIENT_INIT and SERVER_INIT.
+
+If an endpoint receives a MAX_CARRIERS value different from the value that peer advertised during CREATE, the candidate JOIN fails with SESSION_CONFLICT and MUST NOT modify the existing Session.
+
+The Effective Carrier Limit is never renegotiated by JOIN or replacement.
 
 ## 5. Stream opening states
 
@@ -252,7 +308,7 @@ While in OPENING, the Client MUST tolerate the following inbound Frames as **acc
 - RESET_STREAM with Final Offset 0;
 - STOP_SENDING.
 
-Draft 04 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
+Draft 05 has no implicit Stream data credit. Therefore STREAM_DATA cannot legally precede the first STREAM_OPEN_OK, because the Client has not yet advertised receive credit for the accepted Stream.
 
 The Client processes valid acceptance-evidence Frames according to their normal semantics while remaining logically OPENING until STREAM_OPEN_OK is received.
 
@@ -555,7 +611,7 @@ Error selection does not change whether the failure is Carrier-scoped or Session
 
 ## 22. Conformance requirements
 
-A conforming Draft 04 implementation MUST:
+A conforming Draft 05 implementation MUST:
 
 - tolerate cross-Carrier reordering permitted by this document;
 - support acceptance evidence arriving before STREAM_OPEN_OK;
@@ -573,4 +629,8 @@ A conforming Draft 04 implementation MUST:
 - commit higher Generation only after candidate Carrier establishment;
 - prevent superseded Carriers from receiving new Attempts or creating new protocol state;
 - preserve Session-owned state across Carrier replacement;
-- apply the Error Code failure scopes defined in ERROR-HANDLING.md.
+- apply the Error Code failure scopes defined in ERROR-HANDLING.md;
+- negotiate and retain the Effective Carrier Limit from MAX_CARRIERS;
+- count active logical Carriers by distinct current Carrier ID rather than numeric ID magnitude or transport-connection count;
+- reject a candidate with RESOURCE_LIMIT when committing it would exceed the Effective Carrier Limit;
+- release active Carrier capacity when a current Carrier closes or is declared lost without making its Carrier ID reusable as a new identity.

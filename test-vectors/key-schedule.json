@@ -1,31 +1,31 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 04",
+  "revision": "Draft 05",
   "profile": "PSK / HKDF-SHA256 / HMAC-SHA256 / AES-256-GCM",
   "inputs": {
     "transport_key_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
     "connection_preface_hex": "4d50580004",
-    "client_init_hex": "01405901001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0700048000800008000480010000090002480010000101",
-    "server_init_hex": "023a060020202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f0700048000800008000480010000090002480010000101"
+    "client_init_hex": "01405e01001000112233445566778899aabbccddeeff020001000300010104000100050020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f070004800080000800048001000009000248000a0102406010000101",
+    "server_init_hex": "023f060020202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f070004800080000800048001000009000248000a0102408010000101"
   },
   "derived": {
-    "h0_hex": "fd16064627efc15ce25927f517751056abdfb0cd047fdbbb17e1e5ef18c0998f",
+    "h0_hex": "a61a409d25ac57a75e250d9cfbf791fec3004d3d66df080bf5ea67b3fed69d8e",
     "early_secret_hex": "fff6bab75d4df43e3a58d45a6b3d6ebaa0f75da67d71520fc66467d24f537e5e",
-    "handshake_secret_hex": "8a5547746bd92026081fcf47b40091baeb25c0d38a88af1b99a16ceec0681875",
-    "client_finished_key_hex": "0d38dc2579d92953901a28c793a2723e3eed077012c407a3e32317ad44d09510",
-    "server_finished_key_hex": "e7255729181a1464572035b3739f0c485849214aa2aea62aaadd3e972a3d2a44",
-    "client_verify_data_hex": "4344ac42b1062577ca0f40753ed527f5ca7c90211962d18f4e9128c1301ce902",
-    "client_finished_hex": "03204344ac42b1062577ca0f40753ed527f5ca7c90211962d18f4e9128c1301ce902",
-    "h1_hex": "3227620c21a9d43be148759bbc0aa8b97f4b88efe3f53ae775e8e953646b9f95",
-    "server_verify_data_hex": "f9f52ecc65a11deececfabf5263f255197e7e674239831c0593d26b3d07649ac",
-    "server_finished_hex": "0420f9f52ecc65a11deececfabf5263f255197e7e674239831c0593d26b3d07649ac",
-    "h2_hex": "17db858018c52e2cd77c46e377e0bd6359a92a5b9f37a9165865c3bbfbd56752",
-    "client_application_secret_hex": "fd3e1eea8084f00d5639a048ae3e122293f7149af76690d503d1f20b83f9d3e0",
-    "server_application_secret_hex": "51636e320a7176e721f46673fcd68ed9cef185c8c417880ebc3203be98e308f2",
-    "client_traffic_key_hex": "77073510941704d465e98dbb9542bda302465094bef1a8f1a50312b730e7ef68",
-    "client_traffic_iv_hex": "1f0cc87dcd985279eefbc191",
-    "server_traffic_key_hex": "df82c7578fa2c774c7730f3704cc429beab04a61bb6723c0034fe517a974566d",
-    "server_traffic_iv_hex": "1a4f47ec14b6f5c3673e9c8a"
+    "handshake_secret_hex": "f555b453b3ed32085adbae97e9f9c5ef66faac0c671e95935d02be4182d588c6",
+    "client_finished_key_hex": "c7481d79193883ef7f467662efd7bcd96e82678cc274f3b900dfe605882943ed",
+    "server_finished_key_hex": "9504d341acf7b34eb1a3cca842f8fe567988f00c4414439885dc62ab11765009",
+    "client_verify_data_hex": "7c54796c968deed7e5e80db2d38ac28879f50afa82e1da8a583adcde3a70d936",
+    "client_finished_hex": "03207c54796c968deed7e5e80db2d38ac28879f50afa82e1da8a583adcde3a70d936",
+    "h1_hex": "b65c38fcae4574ed7be9320a22fcb89649d783d49d3aa369ebe5ac0f49376d42",
+    "server_verify_data_hex": "3849766e76e56d70762c0dc7d9bf985e0b2c7ca3e8dac6062f1a07e43a7dcbbb",
+    "server_finished_hex": "04203849766e76e56d70762c0dc7d9bf985e0b2c7ca3e8dac6062f1a07e43a7dcbbb",
+    "h2_hex": "3af2ffb86e01fe1b0ecad6db2e39bf251cbf361b2df3d28c5ded1005f1d087c0",
+    "client_application_secret_hex": "e2b3a7bbbec8d3dba2efbbd7eb460061ae559d077345dcead7423037abc621d6",
+    "server_application_secret_hex": "56d7b6f73d37c0db91dc1f5692d157c57bf66cf5138e3345f269bfec7e29f308",
+    "client_traffic_key_hex": "f58314ba277e3894f97c347ee3813e6d732bd5f15614df6c7d10eb8d58ee4e74",
+    "client_traffic_iv_hex": "08683189ca0396f546adc383",
+    "server_traffic_key_hex": "ce6b619760cb84c0ccfbe46aa63f0fcc7905fff8f50382aa68b46c74fe76c25d",
+    "server_traffic_iv_hex": "d4ba984bfb806398ea9047b8"
   },
   "decoded_handshake": {
     "session_id_hex": "00112233445566778899aabbccddeeff",
@@ -44,6 +44,9 @@
       "max_record_size": "65536",
       "max_streams": "2048"
     },
+    "client_max_carriers": "96",
+    "server_max_carriers": "128",
+    "effective_carrier_limit": "96",
     "scheduler": "AGGREGATE"
   }
 }

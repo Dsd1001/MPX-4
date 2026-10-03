@@ -1,7 +1,7 @@
 # MPX/4 Protocol Registries
 
 **Protocol:** MPX/4  
-**Registry Revision:** Draft 04
+**Registry Revision:** Draft 05
 
 This document records numeric assignments used by the MPX/4 Core Protocol.
 
@@ -49,7 +49,8 @@ Private Use values require an explicitly negotiated private profile and are not 
 | 0x07 | MAX_FRAME_PAYLOAD | VarInt | Both / receive limit | Core |
 | 0x08 | MAX_RECORD_SIZE | VarInt | Both / receive limit | Core |
 | 0x09 | MAX_STREAMS | VarInt | Both / receive limit | Core |
-| 0x0a–0x0f | — | — | — | Core-reserved |
+| 0x0a | MAX_CARRIERS | VarInt | Both / Session capability | Core |
+| 0x0b–0x0f | — | — | — | Core-reserved |
 | 0x10 | SCHEDULER | VarInt | Both / Session | Core |
 | 0x11 | PATH_CAPACITY | two VarInts | Client / Carrier | Core |
 | 0x12–0x3f | — | — | — | Core-reserved |
@@ -140,7 +141,7 @@ AUTHENTICATION_FAILED is a registered semantic code, but an endpoint MAY close a
 | Bit | Name | Meaning |
 |---:|---|---|
 | 0 | CRITICAL | Unknown Parameter requires handshake rejection |
-| 1–7 | RESERVED | MUST be zero in Draft 04 |
+| 1–7 | RESERVED | MUST be zero in Draft 05 |
 
 ## 8. Registry stability
 

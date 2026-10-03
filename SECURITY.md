@@ -6,9 +6,9 @@ This document describes security requirements and operational guidance for MPX/4
 
 Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), [STATE-MACHINES.md](STATE-MACHINES.md), and [ERROR-HANDLING.md](ERROR-HANDLING.md). This document supplements those requirements and describes the vulnerability-reporting process for this repository.
 
-## Draft 04 security profile
+## Draft 05 security profile
 
-The mandatory-to-implement Draft 04 profile uses:
+The mandatory-to-implement Draft 05 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;
 - fresh 32-octet Client and Server nonces for every Carrier handshake;
@@ -43,7 +43,7 @@ A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy
 
-The mandatory Draft 04 profile does not provide forward secrecy.
+The mandatory Draft 05 profile does not provide forward secrecy.
 
 Knowledge of the long-term transport key together with recorded handshake and traffic data can permit retrospective derivation of Carrier traffic keys.
 
@@ -60,6 +60,7 @@ Implementations MUST authenticate all Parameters that influence Session behavior
 - scheduler selection;
 - configured path capacity;
 - receive limits;
+- MAX_CARRIERS advertisements and therefore the Effective Carrier Limit;
 - fresh handshake nonces.
 
 Parameter parsing MUST reject duplicate, out-of-order, malformed, and contradictory Core Parameters before accepting the handshake.
@@ -74,7 +75,7 @@ Each Carrier performs a fresh handshake containing fresh nonces and Carrier iden
 
 ## Secure Record safety
 
-Draft 04 uses a per-direction Record Sequence Number beginning at zero.
+Draft 05 uses a per-direction Record Sequence Number beginning at zero.
 
 The sequence number is not transmitted. The underlying ordered byte-stream binding allows the receiver to advance the expected sequence deterministically.
 
@@ -82,7 +83,7 @@ The AES-GCM nonce is the direction-specific traffic IV XORed with the 96-bit rep
 
 Nonce reuse under one traffic key is forbidden.
 
-Draft 04 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
+Draft 05 permits at most 2^24 Secure Records in one direction under one application traffic key. Before exceeding this limit, the endpoint MUST establish a fresh Carrier handshake.
 
 An AEAD authentication failure terminates the affected Carrier. Failed plaintext MUST NOT be processed.
 
@@ -106,7 +107,7 @@ Retransmission and reinjection repeat the same Transmission ID. If the same Tran
 
 ## Stream-data integrity
 
-Draft 04 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
+Draft 05 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md). State contradictions are treated as authenticated semantic protocol errors rather than parser errors.
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
@@ -142,10 +143,11 @@ Implementations SHOULD impose explicit bounds on:
 
 - unauthenticated handshake bytes;
 - Parameters per handshake;
+- simultaneous unauthenticated Carrier candidates;
 - Secure Record plaintext;
 - Frame bodies;
 - active Sessions;
-- Carriers per Session;
+- active logical Carriers per Session, never above the Effective Carrier Limit;
 - active Streams;
 - pending reliable Transmissions;
 - receive buffering;
@@ -186,10 +188,11 @@ The repository provides machine-readable interoperability vectors for:
 
 - MPX VarInt encoding;
 - Frame encoding;
-- Draft 04 key derivation and Finished authentication;
-- Draft 04 Secure Record encryption;
+- Draft 05 key derivation and Finished authentication;
+- Draft 05 Secure Record encryption;
 - Stream state validity;
 - Carrier Generation replacement state;
+- MAX_CARRIERS negotiation and active Carrier accounting;
 - Error Code failure scope.
 
 Independent implementations SHOULD validate these vectors before interoperability testing.
@@ -224,7 +227,7 @@ State compaction MUST NOT refund or recreate Session credit.
 
 ## TCP binding security
 
-The Draft 04 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
+The Draft 05 TCP binding does not treat the TCP peer address, source port, destination port, route, or interface as an authenticated MPX identity.
 
 Every TCP Carrier performs the full MPX authentication handshake.
 

@@ -1,7 +1,7 @@
 # MPX/4 over TCP
 
 **Document:** MPX/4 TCP Transport Binding  
-**Revision:** Draft 04
+**Revision:** Draft 05
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -65,9 +65,11 @@ The Server reads and validates:
 
 The Server MUST NOT treat a TCP connection as an authenticated Carrier until the MPX Finished exchange succeeds.
 
+A TCP connection that is still performing the MPX handshake does not count toward the Session's Active Carrier Count. The negotiated MAX_CARRIERS limit applies only when a candidate would become an active logical Carrier at Core establishment commit.
+
 ## 5. Port selection
 
-MPX/4 Draft 04 does not define or reserve a well-known TCP port.
+MPX/4 Draft 05 does not define or reserve a well-known TCP port.
 
 TCP port selection is a deployment or application-profile concern.
 
@@ -224,7 +226,7 @@ TCP keepalive timing and failure policy are local implementation choices.
 
 An implementation MUST impose a finite local deadline on an incomplete MPX Carrier handshake.
 
-The exact deadline is local policy and is not negotiated by Draft 04.
+The exact deadline is local policy and is not negotiated by Draft 05.
 
 Expiry of the handshake deadline closes only the incomplete Carrier attempt and does not alter authenticated state of an existing Session.
 
@@ -296,7 +298,11 @@ The candidate TCP connection does not become the current Carrier merely by conne
 
 The new TCP connection never resumes the old Carrier cryptographic record stream.
 
-A failed replacement handshake is discarded without changing the current Generation or existing Session state.
+A failed replacement handshake is discarded without changing the current Generation, Active Carrier Count, Effective Carrier Limit, or existing Session state.
+
+If the candidate would reactivate an inactive logical Carrier while the Session is already at its Effective Carrier Limit, the candidate is rejected with RESOURCE_LIMIT before Generation commit.
+
+If the candidate replaces an already active logical Carrier, it does not require an additional active Carrier slot.
 
 After a higher Generation is accepted, lower-Generation TCP connections for the same Carrier ID are superseded according to the Core state machine and SHOULD be closed promptly.
 

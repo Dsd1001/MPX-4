@@ -1,0 +1,177 @@
+{
+  "protocol": "MPX/4",
+  "revision": "Draft 05",
+  "parameter": "MAX_CARRIERS",
+  "parameter_type": "0x0a",
+  "critical_flag_required": true,
+  "encoding_cases": [
+    {
+      "value": "1",
+      "value_varint_hex": "01",
+      "parameter_hex": "0a010101"
+    },
+    {
+      "value": "8",
+      "value_varint_hex": "08",
+      "parameter_hex": "0a010108"
+    },
+    {
+      "value": "96",
+      "value_varint_hex": "4060",
+      "parameter_hex": "0a01024060"
+    },
+    {
+      "value": "128",
+      "value_varint_hex": "4080",
+      "parameter_hex": "0a01024080"
+    },
+    {
+      "value": "1024",
+      "value_varint_hex": "4400",
+      "parameter_hex": "0a01024400"
+    },
+    {
+      "value": "4611686018427387903",
+      "value_varint_hex": "ffffffffffffffff",
+      "parameter_hex": "0a0108ffffffffffffffff"
+    }
+  ],
+  "invalid_parameter_cases": [
+    {
+      "name": "zero",
+      "value": "0",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "name": "noncritical",
+      "value": "96",
+      "flags": "0x00",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "name": "missing-create-client",
+      "message": "CLIENT_INIT CREATE",
+      "expected": "handshake_reject"
+    },
+    {
+      "name": "missing-create-server",
+      "message": "SERVER_INIT CREATE",
+      "expected": "handshake_reject"
+    },
+    {
+      "name": "changed-on-join",
+      "create_client_value": "96",
+      "join_client_value": "128",
+      "expected": "SESSION_CONFLICT"
+    }
+  ],
+  "negotiation_cases": [
+    {
+      "client_max_carriers": "96",
+      "server_max_carriers": "128",
+      "effective_carrier_limit": "96"
+    },
+    {
+      "client_max_carriers": "1024",
+      "server_max_carriers": "8",
+      "effective_carrier_limit": "8"
+    }
+  ],
+  "active_count_cases": [
+    {
+      "name": "sparse-id-does-not-imply-count",
+      "effective_limit": "2",
+      "active_carrier_ids": [
+        "1",
+        "96"
+      ],
+      "active_count": "2",
+      "expected": "valid"
+    },
+    {
+      "name": "third-new-id-over-limit",
+      "effective_limit": "2",
+      "active_carrier_ids": [
+        "1",
+        "96"
+      ],
+      "candidate_carrier_id": "4000000000",
+      "candidate_generation": "0",
+      "expected": "RESOURCE_LIMIT"
+    },
+    {
+      "name": "active-replacement-at-limit",
+      "effective_limit": "2",
+      "active_carrier_ids": [
+        "1",
+        "96"
+      ],
+      "candidate_carrier_id": "96",
+      "candidate_generation": "1",
+      "expected": "accept_replacement",
+      "active_count_after": "2"
+    },
+    {
+      "name": "loss-releases-slot",
+      "effective_limit": "2",
+      "active_carrier_ids_before": [
+        "1",
+        "96"
+      ],
+      "lost_carrier_id": "96",
+      "active_carrier_ids_after": [
+        "1"
+      ],
+      "expected_active_count": "1"
+    },
+    {
+      "name": "historical-id-does-not-reserve-slot",
+      "effective_limit": "2",
+      "historical_carrier_ids": [
+        "96"
+      ],
+      "active_carrier_ids": [
+        "1"
+      ],
+      "candidate_carrier_id": "4000000000",
+      "expected": "may_establish",
+      "active_count_after": "2"
+    },
+    {
+      "name": "inactive-replacement-needs-free-slot",
+      "effective_limit": "2",
+      "historical_carrier_ids": [
+        "96"
+      ],
+      "active_carrier_ids": [
+        "1",
+        "4000000000"
+      ],
+      "candidate_carrier_id": "96",
+      "candidate_generation": "1",
+      "expected": "RESOURCE_LIMIT"
+    }
+  ],
+  "carrier_id_cases": [
+    {
+      "value": "0",
+      "expected": "PROTOCOL_VIOLATION"
+    },
+    {
+      "value": "1",
+      "expected": "valid"
+    },
+    {
+      "value": "96",
+      "expected": "valid"
+    },
+    {
+      "value": "4000000000",
+      "expected": "valid"
+    },
+    {
+      "value": "4611686018427387903",
+      "expected": "valid"
+    }
+  ]
+}

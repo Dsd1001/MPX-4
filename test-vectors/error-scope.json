@@ -1,6 +1,6 @@
 {
   "protocol": "MPX/4",
-  "revision": "Draft 04",
+  "revision": "Draft 05",
   "document": "ERROR-HANDLING.md",
   "cases": [
     {
@@ -99,6 +99,15 @@
       "expected_scope": "retired_identity",
       "expected_action": "ignore_without_recreating_stream",
       "notes": "Retirement alone does not require STREAM_OPEN_REJECT when detailed response state has been compacted."
+    },
+    {
+      "name": "join-exceeds-effective-carrier-limit",
+      "context": "JOIN_HANDSHAKE",
+      "resource_scope": "active_logical_carrier_count",
+      "error": "RESOURCE_LIMIT",
+      "expected_scope": "pre_establishment_carrier",
+      "expected_action": "reject_candidate",
+      "existing_session_modified": false
     },
     {
       "name": "carrier-resource-limit",

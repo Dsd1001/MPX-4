@@ -1,7 +1,7 @@
 # MPX/4 Interoperability Profile
 
 **Document:** MPX/4 Interoperability Profile  
-**Revision:** Draft 04
+**Revision:** Draft 05
 **Protocol Version:** 4  
 **Status:** Working Interoperability Profile
 
@@ -11,7 +11,7 @@ It does not require a specific implementation language, operating system, API sh
 
 ## 1. Interoperability target
 
-Two implementations satisfy the Draft 04 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 04 state rules, error-scope rules, and the TCP binding.
+Two implementations satisfy the Draft 05 Core interoperability profile when they can complete all Mandatory test groups in this document using the MPX/4 Core Protocol, Draft 05 state rules, error-scope rules, and the TCP binding.
 
 The test endpoints are called Implementation A and Implementation B.
 
@@ -23,7 +23,8 @@ Unless a test states otherwise:
 - SCHEDULER is AGGREGATE;
 - MAX_FRAME_PAYLOAD is 32768;
 - MAX_RECORD_SIZE is 65536;
-- MAX_STREAMS is at least 32.
+- MAX_STREAMS is at least 32;
+- both endpoints advertise MAX_CARRIERS of at least 4 unless a test specifies another value.
 
 Tests SHOULD also be repeated with implementations swapped when both products support both endpoint roles.
 
@@ -109,6 +110,22 @@ A duplicate Core Parameter is rejected.
 
 Core Parameters not in strictly increasing type order are rejected.
 
+### B8. MAX_CARRIERS negotiation
+
+A advertises MAX_CARRIERS=96 and B advertises MAX_CARRIERS=128. Both endpoints establish Effective Carrier Limit 96.
+
+### B9. MAX_CARRIERS criticality
+
+MAX_CARRIERS is encoded with CRITICAL=1. A peer sending the known MAX_CARRIERS Parameter with CRITICAL=0 is rejected with PROTOCOL_VIOLATION.
+
+### B10. Missing MAX_CARRIERS
+
+CREATE without MAX_CARRIERS in CLIENT_INIT or SERVER_INIT is rejected.
+
+### B11. JOIN consistency
+
+On JOIN, both endpoints repeat their original CREATE-time MAX_CARRIERS values. Changing either advertisement produces SESSION_CONFLICT and leaves the established Session unchanged.
+
 ## 6. Group C — Single-Carrier Stream
 
 **Mandatory.**
@@ -158,6 +175,30 @@ Behavior follows STATE-MACHINES.md.
 ### D4. Carrier-specific record spaces
 
 Each Carrier begins application Secure Record sequence numbering at zero under independently derived traffic keys.
+
+### D5. Carrier ID space is independent of concurrency
+
+With Effective Carrier Limit at least 2, the Session establishes two logical Carriers using IDs 1 and 96. Carrier ID 96 is accepted even though the Session contains only two active logical Carriers.
+
+### D6. Effective Carrier Limit enforcement
+
+A and B negotiate Effective Carrier Limit 2. After two distinct logical Carriers are active, a JOIN for a third previously unused Carrier ID is rejected with RESOURCE_LIMIT and the existing two-Carriers Session remains usable.
+
+### D7. Slot release
+
+With Effective Carrier Limit 2, one active Carrier closes or is declared lost. A new previously unused Carrier ID can then establish, returning the Active Carrier Count to 2.
+
+### D8. Active replacement does not consume an additional slot
+
+With Active Carrier Count equal to Effective Carrier Limit, a higher Generation for one already active Carrier ID can replace that current incarnation without requiring an additional Carrier slot. The Active Carrier Count remains unchanged.
+
+### D9. Inactive replacement requires a free slot
+
+A Carrier is lost and releases its active slot. Another previously unused Carrier ID consumes the freed capacity. A later replacement of the lost Carrier ID is rejected with RESOURCE_LIMIT until capacity becomes available again.
+
+### D10. Historical Carrier IDs do not consume active capacity
+
+A closed or lost Carrier retains Highest Accepted Generation and cannot be reused with the same Generation, but its historical identity does not count toward the Active Carrier Count.
 
 ## 8. Group E — Reliability and reinjection
 
@@ -439,7 +480,7 @@ Resource pressure must not create wire behavior that violates the Core protocol.
 A published interoperability report SHOULD contain:
 
     Protocol: MPX/4
-    Revision: Draft 04
+    Revision: Draft 05
     Binding: TCP
     Implementation A: <name/version>
     Implementation B: <name/version>
@@ -461,8 +502,10 @@ Optional groups are reported separately.
 
 ## 19. Compatibility
 
-Draft 04 preserves Draft 03 Core wire encodings and cryptographic vectors.
+Draft 05 preserves Draft 04 Frame encodings, Secure Record format, cryptographic derivations, and existing registry assignments, but adds one mandatory Core Handshake Parameter: MAX_CARRIERS (0x0a).
 
-Draft 04 makes Carrier Generation replacement, Error Code failure scope, Carrier-specific PING/PONG measurement semantics, and Scheduler contracts more precise. It adds no new Core Frame or Parameter numeric assignment.
+Draft 05 removes the fixed Carrier-ID range 1 through 8. CARRIER_ID now uses the full non-zero MPX VarInt range, while simultaneous active logical Carrier count is limited by the negotiated Effective Carrier Limit.
 
-A Draft 03 implementation can therefore retain its wire encoder, decoder, and cryptographic vectors while adding the tightened Generation, error-scope, measurement, and Scheduler semantics required by Draft 04.
+MAX_CARRIERS MUST be sent with CRITICAL=1. Draft 05 is therefore intentionally not CREATE/JOIN-handshake-compatible with a Draft 04 endpoint that does not understand MAX_CARRIERS: the older endpoint rejects the unknown critical Parameter instead of silently applying the obsolete fixed-eight rule.
+
+Existing Draft 04 Frame, Secure Record format, Stream, reliability, Generation, error-scope, and cryptographic algorithm logic can otherwise be retained. However, Finished values, traffic secrets, traffic keys, traffic IVs, and dependent Secure Record test vectors change because the authenticated CLIENT_INIT / SERVER_INIT transcript now contains MAX_CARRIERS.

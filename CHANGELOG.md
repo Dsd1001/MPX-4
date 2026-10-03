@@ -4,6 +4,50 @@ All notable MPX/4 specification changes are recorded here.
 
 MPX/4 remains in draft status. Draft revisions may make incompatible wire-format changes until a stable protocol revision is declared.
 
+## Draft 05 — 2026-10-03
+
+Draft 05 decouples Carrier identity space from active Carrier concurrency. It removes the fixed eight-Carrier Core limit and introduces bilateral MAX_CARRIERS negotiation.
+
+### Added
+
+- Core Handshake Parameter `MAX_CARRIERS` at Parameter Type `0x0a`.
+- Mandatory CRITICAL=1 encoding for MAX_CARRIERS.
+- Client Carrier Limit and Server Carrier Limit advertisements during CREATE.
+- Session-wide `Effective Carrier Limit = min(Client Carrier Limit, Server Carrier Limit)`.
+- Active logical Carrier counting rules independent of Carrier ID magnitude.
+- Explicit slot accounting for new Carrier IDs, active replacement, inactive replacement, CARRIER_CLOSE, SESSION_CLOSE, and detected transport loss.
+- Machine-readable [max-carriers.json](test-vectors/max-carriers.json) encoding and state-conformance cases.
+- Mandatory interoperability tests for asymmetric negotiation, high/sparse Carrier IDs, limit enforcement, slot release, and replacement at the limit.
+
+### Changed
+
+- CARRIER_ID now uses the full non-zero MPX VarInt range `1 .. 2^62-1` instead of the fixed Draft 04 range `1 .. 8`.
+- `Maximum Carriers per Session = 8` is removed from Core resource limits.
+- Every CREATE and JOIN handshake now carries MAX_CARRIERS in both directions.
+- JOIN MUST repeat each endpoint's original CREATE-time MAX_CARRIERS value; a change is SESSION_CONFLICT.
+- A candidate that would increase Active Carrier Count beyond the Effective Carrier Limit is rejected with RESOURCE_LIMIT without modifying the established Session.
+- A higher Generation replacing an already active logical Carrier does not consume an additional active Carrier slot.
+- Replacing an inactive logical Carrier requires a free active Carrier slot at commit time.
+- A closed or lost logical Carrier releases active capacity while retaining its historical Carrier ID and Highest Accepted Generation.
+- Handshake transcript vectors, Finished values, application secrets, traffic keys, traffic IVs, and dependent Secure Record vectors are regenerated because MAX_CARRIERS is authenticated as part of CLIENT_INIT and SERVER_INIT.
+
+### Clarified
+
+- Carrier ID numeric magnitude is identity only and does not imply Carrier count.
+- Sparse Carrier IDs are legal.
+- HANDSHAKING candidates do not count against MAX_CARRIERS.
+- Historical Carrier IDs, retained Generation state, and tombstones do not consume active Carrier slots.
+- MAX_CARRIERS is an upper bound and does not guarantee admission when another valid resource or protocol rejection applies.
+- Local active counts can temporarily differ because endpoints may detect transport loss at different times; the negotiated Effective Carrier Limit itself remains identical and immutable.
+
+### Compatibility
+
+Draft 05 preserves Draft 04 Frame encodings, Secure Record format, VarInt format, Scheduler IDs, Error Codes, and cryptographic algorithms.
+
+Draft 05 is intentionally not CREATE/JOIN-handshake-compatible with Draft 04 because MAX_CARRIERS is a new mandatory critical Parameter. A Draft 04 endpoint that does not understand Parameter `0x0a` rejects it instead of silently assuming the obsolete fixed-eight rule.
+
+Because MAX_CARRIERS changes the authenticated handshake transcript, Draft 04 Finished and traffic-key test vectors are not valid Draft 05 vectors even though the underlying HKDF/HMAC/AES-GCM algorithms are unchanged.
+
 ## Draft 04 — 2026-10-03
 
 Draft 04 is a protocol-semantics and interoperability-precision revision. It preserves Draft 03 Core wire encodings, cryptographic derivations, Frame and Parameter assignments, and TCP binding framing.

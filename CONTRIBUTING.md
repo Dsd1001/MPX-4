@@ -68,6 +68,8 @@ Changes to Stream, Carrier, Session, or Transmission lifecycle behavior SHOULD u
 
 Changes to Carrier Generation or replacement semantics SHOULD update `test-vectors/carrier-generation.json`.
 
+Changes to CARRIER_ID range, MAX_CARRIERS negotiation, or active logical Carrier accounting SHOULD update `test-vectors/max-carriers.json`.
+
 Changes to Error Code scope or close behavior SHOULD update [ERROR-HANDLING.md](ERROR-HANDLING.md) and `test-vectors/error-scope.json`.
 
 Changes to TCP transport mapping SHOULD update `bindings/tcp.md`, `test-vectors/tcp-binding.json`, and the relevant Mandatory group in [INTEROPERABILITY.md](INTEROPERABILITY.md).

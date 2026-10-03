@@ -14,7 +14,7 @@ It provides:
 ## Current specification
 
 **Protocol version:** 4  
-**Specification revision:** Draft 04
+**Specification revision:** Draft 05
 **Status:** Working Draft
 
 - [Core Protocol Specification](SPECIFICATION.md)
@@ -69,9 +69,10 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 - [State validity cases](test-vectors/state-validity.json)
 - [Carrier Generation cases](test-vectors/carrier-generation.json)
 - [Error-scope cases](test-vectors/error-scope.json)
+- [MAX_CARRIERS negotiation and active-count cases](test-vectors/max-carriers.json)
 - [TCP binding framing cases](test-vectors/tcp-binding.json)
 
-Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, cryptographic derivations, lifecycle behavior, Carrier Generation semantics, and failure scope.
+Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, and failure scope.
 
 ## Extension points
 
@@ -133,6 +134,7 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── state-validity.json
     │   ├── carrier-generation.json
     │   ├── error-scope.json
+    │   ├── max-carriers.json
     │   └── tcp-binding.json
     └── .github/
         ├── ISSUE_TEMPLATE/

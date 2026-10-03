@@ -1,7 +1,7 @@
 # MPX/4 Error Handling and Failure Scope
 
 **Document:** MPX/4 Error Handling Supplement  
-**Revision:** Draft 04  
+**Revision:** Draft 05
 **Protocol Version:** 4  
 **Status:** Normative Working Draft
 
@@ -128,10 +128,11 @@ The protocol action depends on the resource being protected:
 
 - inability to accept one additional Stream: STREAM_OPEN_REJECT;
 - inability to complete one candidate Carrier handshake: terminate that candidate Carrier;
+- a candidate whose establishment would exceed the negotiated Effective Carrier Limit: reject that candidate with RESOURCE_LIMIT;
 - an established Carrier-specific resource limit: CARRIER_CLOSE;
 - a Session-wide resource condition under which shared state cannot safely continue: SESSION_CLOSE.
 
-Resource policy, memory sizing, queue sizing, and eviction strategy are local implementation choices and are not negotiated by Core.
+General resource policy, memory sizing, queue sizing, handshake-admission policy, and eviction strategy remain local implementation choices. The explicit exception is active logical Carrier concurrency: MAX_CARRIERS is negotiated by Core and defines the immutable Effective Carrier Limit for the Session.
 
 ## 5. Error selection precedence
 
@@ -186,8 +187,11 @@ The following failures reject only the candidate Carrier:
 - candidate-Carrier RESOURCE_LIMIT;
 - malformed or invalid handshake state.
 
+A JOIN candidate that would make the endpoint's local Active Carrier Count exceed the Effective Carrier Limit is rejected with RESOURCE_LIMIT. The existing Session remains active.
+
 A failed JOIN MUST NOT:
 
+- change either endpoint's stored MAX_CARRIERS advertisement or the Effective Carrier Limit;
 - advance the accepted Carrier Generation;
 - supersede an existing Carrier;
 - reset cryptographic state of another Carrier;
