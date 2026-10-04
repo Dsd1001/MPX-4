@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """MPX/4 Draft 11 Gate 3 Mandatory-profile harness.
 
-Gate 3 is the reference implementation's mixed-evidence executable A-L profile.
+Gate 3 is the reference implementation's model-zero executable A-L profile.
 It deliberately combines:
 - real TCP Gate 1 integration,
 - real TCP Gate 2 multi-Carrier/fault scenarios,
-- direct wire/crypto reproduction from canonical vectors, and
-- a stateful runtime model for edge cases that require exhaustion, tombstones,
-  opening races, candidate races, or intentionally invalid peer behavior.
+- direct wire/crypto reproduction from canonical vectors,
+- authenticated endpoint execution for lifecycle/error/edge semantics, and
+- a stateful runtime model as a supplemental oracle for selected assertions.
 
-It does not import tools/validate.py or tools/semantic_validation.py. Model-only
-case IDs remain explicit and are not represented as endpoint acceptance.
+It does not import tools/validate.py or tools/semantic_validation.py. No
+Mandatory case relies on the state model as its sole evidence.
 """
 
 from __future__ import annotations
@@ -84,12 +84,57 @@ CROSS_WIRE_CASES = {
 }
 
 ENDPOINT_WIRE_CASES = {
+    "B11": ("join-limit-consistency",),
+    "B12": ("session-protocol-version",),
+    "B13": ("version-negotiation-server", "version-negotiation-client"),
+    "B16": ("create-session-collision",),
+    "C7": ("stream-id-exhaustion",),
+    "D3": ("cross-carrier-order",),
+    "D6": ("carrier-limit",),
+    "D7": ("carrier-slot-release",),
+    "D8": ("active-replacement-limit",),
+    "D9": ("inactive-replacement-limit",),
+    "D10": ("historical-carrier-capacity",),
+    "E4": ("conflicting-txid-reuse",),
+    "E6": ("txid-exhaustion",),
+    "E7": ("retirement-watermark",),
+    "E8": ("confirmation-class",),
+    "E10": ("allocated-tx-survives-loss",),
+    "F2": ("stream-boundary",),
+    "F3": ("session-aggregate-credit",),
+    "F4": ("reinjection-accounting",),
     "F5": ("stale-credit",),
     "F6": ("crossed-session-credit", "crossed-stream-credit"),
     "F8": ("terminal-credit-violation", "fin-data-beyond-final"),
     "G1": ("fin-fill-hole",),
     "G2": ("fin-data-beyond-final",),
     "G3": ("reset-late-data-suppressed",),
+    "G6": ("stream-consumed",),
+    "H1": ("credit-overtakes-open-ok",),
+    "H2": ("data-before-open-ok",),
+    "H3": ("preopen-reset",),
+    "H4": ("preopen-stop",),
+    "H5": ("acceptance-wins-cancel",),
+    "I1": ("tombstone-terminal-duplicate",),
+    "I2": ("tombstone-conflicting-final",),
+    "I3": ("retired-stale-no-recreate",),
+    "I4": ("stream-id-reuse",),
+    "I5": ("tombstone-not-active-limit",),
+    "I6": ("terminal-confirmation-replay",),
+    "J5": ("failed-candidate-nonmutating",),
+    "J6": ("stale-generation",),
+    "J7": ("candidate-conflict",),
+    "J8": ("first-generation-zero",),
+    "J9": ("atomic-supersession",),
+    "J10": ("replacement-preserves-session",),
+    "J11": ("simultaneous-candidates",),
+    "J15": ("dormant-retirement",),
+    "K1": ("carrier-close",),
+    "K2": ("bare-eof",),
+    "K3": ("session-close",),
+    "K4": ("duplicate-session-close",),
+    "K5": ("tcp-half-close",),
+    "K6": ("close-tail",),
     "L4": ("invalid-stream-parity",),
     "L5": ("flow-control-data",),
     "L6": ("session-aggregate-credit",),
@@ -104,6 +149,7 @@ ENDPOINT_WIRE_CASES = {
     "L15": ("stream-limit",),
     "L16": ("candidate-conflict",),
     "L17": ("create-collision",),
+    "L18": ("handshake-reject-no-mutation",),
     "L19": ("authentication-carrier-scope",),
     "L20": ("frame-encoding-carrier-scope",),
     "L21": ("flow-control-data", "crossed-session-credit"),
@@ -278,10 +324,11 @@ class Gate3:
         executions = self.endpoint_wire.get("cases") or []
         for name in required:
             hits = [x for x in executions if x.get("case") == name and x.get("status") == "PASS"]
-            expected = 1 if name in SERVER_ONLY_ENDPOINT_CASES else 2
+            from_mandatory_suite = any(x.get("source_suite") == "endpoint-mandatory" for x in hits)
+            expected = 1 if from_mandatory_suite or name in SERVER_ONLY_ENDPOINT_CASES else 2
             check(
                 len(hits) == expected,
-                f"{case_id} requires endpoint-wire {name}: expected {expected} role executions, got {len(hits)}",
+                f"{case_id} requires endpoint-wire {name}: expected {expected} execution(s), got {len(hits)}",
             )
         return required
 
@@ -308,6 +355,7 @@ class Gate3:
         gate1_frag_dir = self.out_dir / "gate1-fragmented"
         gate2_dir = self.out_dir / "gate2"
         endpoint_wire_dir = self.out_dir / "endpoint-wire"
+        endpoint_mandatory_dir = self.out_dir / "endpoint-mandatory"
         run([sys.executable, "-m", "reference.selftest"])
         run([sys.executable, "reference/interop_harness.py", "--out-dir", str(gate1_dir)])
         run([
@@ -332,10 +380,30 @@ class Gate3:
             "--out-dir",
             str(endpoint_wire_dir),
         ])
+        run([
+            sys.executable,
+            "-m",
+            "interop.endpoint_mandatory",
+            "--implementation",
+            "reference",
+            "--out-dir",
+            str(endpoint_mandatory_dir),
+        ])
         self.gate1 = json.loads((gate1_dir / "gate1-report.json").read_text())
         self.gate1_frag = json.loads((gate1_frag_dir / "gate1-report.json").read_text())
         self.gate2 = json.loads((gate2_dir / "gate2-report.json").read_text())
-        self.endpoint_wire = json.loads((endpoint_wire_dir / "endpoint-wire-report.json").read_text())
+        wire_report = json.loads((endpoint_wire_dir / "endpoint-wire-report.json").read_text())
+        mandatory_report = json.loads((endpoint_mandatory_dir / "endpoint-mandatory-report.json").read_text())
+        combined_cases = [dict(x, source_suite="endpoint-wire") for x in wire_report.get("cases", [])]
+        combined_cases += [dict(x, source_suite="endpoint-mandatory") for x in mandatory_report.get("cases", [])]
+        self.endpoint_wire = {
+            "status": "PASS" if wire_report.get("status") == mandatory_report.get("status") == "PASS" else "FAIL",
+            "execution_count": int(wire_report.get("execution_count", 0)) + int(mandatory_report.get("execution_count", 0)),
+            "cases": combined_cases,
+            "base_endpoint_wire_execution_count": wire_report.get("execution_count", 0),
+            "formerly_model_only_execution_count": mandatory_report.get("execution_count", 0),
+            "formerly_model_only_covered_ids": mandatory_report.get("covered_mandatory_ids", []),
+        }
         check(
             self.gate1["status"]
             == self.gate1_frag["status"]
@@ -1278,9 +1346,9 @@ class Gate3:
             "model_only_case_ids": model_only_case_ids,
             "cases": [self.results[x] for x in MANDATORY],
             "claim_boundary": (
-                "121-case A-L Mandatory profile with explicit evidence classes. "
-                "Receiver/error-scope cases mapped in ENDPOINT_WIRE_CASES require authenticated real-TCP endpoint execution; "
-                "model-only cases remain explicit oracle/state evidence and are not represented as endpoint acceptance. "
+                "121-case A-L Mandatory profile with explicit executable evidence classes and model_only_case_ids=[]; "
+                "18 cases use codec evidence, 30 use cross-wire evidence, and 73 require authenticated endpoint-wire evidence. "
+                "The state model remains an oracle for some assertions but is not the sole evidence for any Mandatory case. "
                 "This Gate alone is not independent A/B interoperability."
             ),
         }

@@ -96,11 +96,11 @@ Test vectors and conformance cases are intended to let independent implementatio
 
 The `reference/` implementation runs a real TCP Client and Server as separate processes, uses fresh handshake randomness, and exchanges authenticated Secure Records. Gate 1 exercises 16 concurrent Streams and 1 MiB of application data in each direction. Gate 2 adds deterministic multi-Carrier/fault/recovery scenarios.
 
-Gate 3 retains the 121 A–L case IDs but now records the evidence class of every case as `model`, `codec`, `endpoint-wire`, or `cross-wire`. Review-driven receive/error-scope cases cannot pass on the state model alone: they are bound to authenticated loopback TCP probes that complete CREATE/Finished and exchange real Secure Records. The current profile reports model-only case IDs explicitly instead of presenting them as endpoint acceptance.
+Gate 3 retains the 121 A–L case IDs and records the executable evidence class of every case as `codec`, `endpoint-wire`, or `cross-wire`. The former state-model-only coverage has been driven down to **zero**: each previously model-only Mandatory requirement is now bound to a real runtime execution, while codec-only and cross-wire cases retain those evidence classes where they are the appropriate executable test surface. Each implementation currently reports **18 codec + 30 cross-wire + 73 endpoint-wire + 0 model** case IDs.
 
-Gate 4 adds `independent/`, a source-isolated second implementation with its own wire/crypto/endpoint runtime, plus neutral `interop/` harnesses. The aggregate requires both mixed-evidence 121-case profiles, **96 authenticated endpoint-wire executions**, **8 deliberate-defect coverage-sensitivity controls**, A→B/B→A basic full-duplex runs, and all five cross-runtime fault scenarios in direct and fragmented modes. The B runtime is audited to import no `reference/`, `tools/`, or validator code.
+Gate 4 adds `independent/`, a source-isolated second implementation with its own wire/crypto/endpoint runtime, plus neutral `interop/` harnesses. The aggregate requires both 121/121 executable-evidence profiles with `model=0`, **182 authenticated endpoint executions** (96 baseline receiver/error probes plus 86 A/B executions for formerly model-only requirements), **8 deliberate-defect coverage-sensitivity controls**, A→B/B→A basic full-duplex runs, and all five cross-runtime fault scenarios in direct and fragmented modes. The B runtime is audited to import no `reference/`, `tools/`, or validator code and the critical A/B receive handlers are structurally compared.
 
-This is a source/module-independence claim, not a claim that the two implementations were developed by separate organizations: both live in this repository and share public fixtures and test-scenario design. Gate 4 PASS is not described as complete endpoint execution of all 121 Mandatory cases while model-only entries remain. Draft 11 still does **not** declare Protocol Version 4 stable.
+This is a source/module-independence claim, not a claim that the two implementations were developed by separate organizations: both live in this repository and share public fixtures and test-scenario design. No Mandatory case is model-only, but this still does **not** mean all 121 cases are endpoint-wire tests: 18 are codec evidence and 30 are cross-wire evidence by design. Draft 11 still does **not** declare Protocol Version 4 stable.
 
 ## Extension points
 
@@ -124,7 +124,7 @@ Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
 ## Repository validation
 
-The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, wire-derived handshake limits, direction-bound Secure Record keys/IVs, Core Frame body legality, negotiated MAX_FRAME_PAYLOAD, close Reason length and close-last ordering, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, mutation checks under Python optimization, canonical-vector self-tests, real-TCP Gates 1–2, authenticated endpoint-wire negative/positive controls, handler-sensitivity controls, mixed-evidence 121-case Gate 3 profiles, and aggregate two-runtime Gate 4 evidence.
+The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, wire-derived handshake limits, direction-bound Secure Record keys/IVs, Core Frame body legality, negotiated MAX_FRAME_PAYLOAD, close Reason length and close-last ordering, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, mutation checks under Python optimization, canonical-vector self-tests, real-TCP Gates 1–2, authenticated endpoint-wire negative/positive controls, formerly-model-only Mandatory endpoint execution, handler-sensitivity controls, model-zero 121-case Gate 3 profiles, and aggregate two-runtime Gate 4 evidence.
 
 Validation tooling supports Python 3.11 and 3.12 and requires `cryptography>=42,<47`. GitHub Actions runs the full suite on both Python versions. `tools/validate.py` uses exit status 2 for conformance/vector validation failures; unexpected runtime or tooling failures use a different non-zero exit. `tools/mutation_test.py` first requires an unchanged baseline PASS in ordinary and optimized mode and accepts only the explicit validation-failure status for a mutation.
 
@@ -138,6 +138,7 @@ Validation tooling supports Python 3.11 and 3.12 and requires `cryptography>=42,
     python reference/gate2_harness.py --out-dir /tmp/mpx4-gate2
     python reference/gate2_harness.py --out-dir /tmp/mpx4-gate2-fragmented --write-chunk 257
     python -m interop.endpoint_wire --out-dir /tmp/mpx4-endpoint-wire
+    python -m interop.endpoint_mandatory --out-dir /tmp/mpx4-endpoint-mandatory
     python -m interop.endpoint_sensitivity --out-dir /tmp/mpx4-endpoint-sensitivity
     python -m reference.gate3_harness --out-dir /tmp/mpx4-gate3
     python -m independent.selftest
@@ -230,6 +231,9 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── README.md
     │   ├── cross_basic.py
     │   ├── cross_fault.py
+    │   ├── endpoint_wire.py
+    │   ├── endpoint_mandatory.py
+    │   ├── endpoint_sensitivity.py
     │   └── gate4_harness.py
     └── .github/
         ├── workflows/

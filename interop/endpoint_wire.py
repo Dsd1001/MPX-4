@@ -172,6 +172,7 @@ class Fixture:
         endpoint_role: str,
         *,
         max_streams: int = 32,
+        max_carriers: int = 4,
     ) -> None:
         self.implementation = implementation
         self.endpoint_role = endpoint_role
@@ -181,7 +182,7 @@ class Fixture:
             max_frame_payload=32768,
             max_record_size=65536,
             max_streams=max_streams,
-            max_carriers=4,
+            max_carriers=max_carriers,
         )
         self.trace = MemoryTrace(f"{implementation}-{endpoint_role}")
         session_cls = (
@@ -205,6 +206,7 @@ class Fixture:
         self.connection_tasks: set[asyncio.Task] = set()
         self.peers: Dict[int, Peer] = {}
         self.peer_next_txid: Dict[int, int] = {}
+        self.peer_tx_cursor = 1
 
     async def __aenter__(self) -> "Fixture":
         if self.endpoint_role == "server":
@@ -470,38 +472,140 @@ class Fixture:
         await peer.recv_until(self.core.FRAME_SESSION_CREDIT)
         return peer
 
+    async def raw_candidate(
+        self,
+        *,
+        action: int,
+        carrier_id: int,
+        generation: int,
+        version: Optional[int] = None,
+        limits: Optional[object] = None,
+        session_id: Optional[bytes] = None,
+        corrupt_finished: bool = False,
+        complete: bool = False,
+    ) -> Dict[str, object]:
+        check(self.endpoint_role == "server", "raw candidate probe targets server admission")
+        core = self.core
+        assert self.port is not None
+        requested_version = core.VERSION if version is None else version
+        candidate_limits = self.limits if limits is None else limits
+        candidate_sid = self.session_id if session_id is None else session_id
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        preface = core.MAGIC + core.vi_enc(requested_version)
+        client_init = core.encode_client_init(
+            candidate_sid,
+            carrier_id,
+            generation,
+            secrets.token_bytes(32),
+            candidate_limits,
+            action,
+        )
+        writer.write(preface + client_init)
+        await writer.drain()
+        try:
+            msg, body, raw = await asyncio.wait_for(core.read_message(reader), timeout=1.0)
+        except asyncio.IncompleteReadError:
+            writer.close()
+            return {"message_type": None, "closed": True}
+        result: Dict[str, object] = {"message_type": msg, "raw_hex": raw.hex()}
+        if msg == core.MSG_HANDSHAKE_REJECT:
+            code, end = core.vi_dec(body)
+            check(end == len(body), "HANDSHAKE_REJECT trailing bytes")
+            result["error_code"] = code
+            try:
+                await asyncio.wait_for(reader.readexactly(1), timeout=0.5)
+            except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+                pass
+            writer.close()
+            return result
+        if msg == core.MSG_VERSION_NEGOTIATION:
+            count, pos = core.vi_dec(body)
+            versions = []
+            for _ in range(count):
+                item, pos = core.vi_dec(body, pos)
+                versions.append(item)
+            check(pos == len(body), "VERSION_NEGOTIATION trailing bytes")
+            result["versions"] = versions
+            writer.close()
+            return result
+        check(msg == core.MSG_SERVER_INIT, f"unexpected handshake message {msg}")
+        result["server_init"] = raw
+        if not complete:
+            writer.close()
+            return result
+        _, server_limits = core.parse_server_init(raw)
+        client_finished, expected_sf, h0, prelim = core.derive_traffic(
+            self.key, preface, client_init, raw
+        )
+        if corrupt_finished:
+            client_finished = client_finished[:-1] + bytes((client_finished[-1] ^ 1,))
+        writer.write(client_finished)
+        await writer.drain()
+        try:
+            msg2, body2, raw2 = await asyncio.wait_for(core.read_message(reader), timeout=1.0)
+        except asyncio.IncompleteReadError:
+            writer.close()
+            result["finished_result"] = "closed"
+            return result
+        result["finished_message_type"] = msg2
+        if msg2 == core.MSG_HANDSHAKE_REJECT:
+            code, end = core.vi_dec(body2)
+            check(end == len(body2), "post-init HANDSHAKE_REJECT trailing bytes")
+            result["error_code"] = code
+            writer.close()
+            return result
+        check(msg2 == core.MSG_SERVER_FINISHED, f"expected SERVER_FINISHED, got {msg2}")
+        h1 = hashlib.sha256(preface + client_init + raw + client_finished).digest()
+        core.validate_finished(raw2, core.MSG_SERVER_FINISHED, prelim.server_finished_key, h1)
+        check(raw2 == expected_sf, "SERVER_FINISHED canonical mismatch")
+        _, _, _, traffic = core.derive_traffic(
+            self.key, preface, client_init, raw, client_finished=client_finished, server_finished=raw2
+        )
+        carrier = core.Carrier(
+            role="client",
+            reader=reader,
+            writer=writer,
+            trace=NullTrace(),
+            local_limits=candidate_limits,
+            peer_limits=server_limits,
+            send_key=traffic.client_key,
+            send_iv=traffic.client_iv,
+            recv_key=traffic.server_key,
+            recv_iv=traffic.server_iv,
+            session_id=candidate_sid,
+            carrier_id=carrier_id,
+            generation=generation,
+            write_chunk=0,
+        )
+        result["peer"] = Peer(core, carrier, [])
+        return result
+
     async def expect_rejected_candidate(
         self,
         *,
         action: int,
         carrier_id: int,
         generation: int,
-    ) -> None:
-        check(self.endpoint_role == "server", "candidate rejection probe targets server admission")
-        core = self.core
-        assert self.port is not None
-        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
-        client_init = core.encode_client_init(
-            self.session_id,
-            carrier_id,
-            generation,
-            secrets.token_bytes(32),
-            self.limits,
-            action,
+        expected_error_code: Optional[int] = None,
+        limits: Optional[object] = None,
+        version: Optional[int] = None,
+    ) -> Dict[str, object]:
+        result = await self.raw_candidate(
+            action=action,
+            carrier_id=carrier_id,
+            generation=generation,
+            limits=limits,
+            version=version,
         )
-        writer.write(core.MAGIC + core.vi_enc(core.VERSION) + client_init)
-        await writer.drain()
-        try:
-            await asyncio.wait_for(core.read_message(reader), timeout=0.5)
-        except (asyncio.IncompleteReadError, ConnectionError):
-            pass
-        else:
-            raise ProbeError("rejected candidate unexpectedly received SERVER_INIT")
-        writer.close()
-        await asyncio.sleep(0)
+        check(result.get("message_type") == self.core.MSG_HANDSHAKE_REJECT, result)
+        if expected_error_code is not None:
+            check(result.get("error_code") == expected_error_code, result)
+        return result
 
     def next_peer_tx(self, carrier_id: int) -> int:
-        value = self.peer_next_txid[carrier_id]
+        check(carrier_id in self.peers, f"unknown peer Carrier {carrier_id}")
+        value = self.peer_tx_cursor
+        self.peer_tx_cursor += 1
         self.peer_next_txid[carrier_id] = value + 1
         return value
 
@@ -935,6 +1039,7 @@ async def case_unknown_stream_data(f: Fixture) -> dict:
 
 async def case_shutdown_blocks_new_work(f: Fixture) -> dict:
     p = await f.establish()
+    endpoint_carrier = f.session.carriers.get(1)
     await p.carrier.send_frame(
         f.core.FRAME_TRANSMISSION_ACK,
         stream_id=1,
@@ -953,7 +1058,8 @@ async def case_shutdown_blocks_new_work(f: Fixture) -> dict:
         check(before == after, "closing server admitted/mutated JOIN candidate")
     else:
         try:
-            await f.session.open_stream(3, f.session.carriers[1])
+            check(endpoint_carrier is not None, "missing pre-close endpoint Carrier")
+            await f.session.open_stream(3, endpoint_carrier)
         except RuntimeError:
             pass
         else:

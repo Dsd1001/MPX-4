@@ -53,22 +53,27 @@ from .core import (
     FinalSizeError,
     Limits,
     MAGIC,
+    MAX_VARINT,
     MSG_CLIENT_FINISHED,
     MSG_CLIENT_INIT,
+    MSG_HANDSHAKE_REJECT,
     MSG_SERVER_FINISHED,
     MSG_SERVER_INIT,
+    MSG_VERSION_NEGOTIATION,
     ProtocolError,
     Trace,
     TransmissionError,
     VERSION,
     derive_traffic,
     encode_client_init,
+    encode_message,
     encode_server_init,
     parse_client_init,
     parse_server_init,
     read_message,
     read_varint,
     validate_finished,
+    vi_dec,
     vi_enc,
 )
 
@@ -76,6 +81,7 @@ ERROR_NO_ERROR = 0x00
 ERROR_PROTOCOL_VIOLATION = 0x02
 ERROR_AUTHENTICATION_FAILED = 0x03
 ERROR_RESOURCE_LIMIT = 0x05
+ERROR_SESSION_NOT_FOUND = 0x06
 ERROR_SESSION_CONFLICT = 0x07
 ERROR_STREAM_LIMIT = 0x08
 ERROR_FLOW_CONTROL = 0x09
@@ -109,6 +115,18 @@ class AmbiguousHandshake(RuntimeError):
 class CandidateReject(RuntimeError):
     def __init__(self, error_code: int, message: str) -> None:
         super().__init__(message)
+        self.error_code = error_code
+
+
+class VersionNegotiationReceived(RuntimeError):
+    def __init__(self, versions: List[int]) -> None:
+        super().__init__(f"VERSION_NEGOTIATION {versions}")
+        self.versions = tuple(versions)
+
+
+class HandshakeRejected(RuntimeError):
+    def __init__(self, error_code: int) -> None:
+        super().__init__(f"candidate rejected 0x{error_code:x}")
         self.error_code = error_code
 
 
@@ -181,6 +199,14 @@ class TxState:
 class StreamState:
     stream_id: int
     local_maximum: int = 1024 * 1024
+    lifecycle: str = "OPEN"
+    accepted: bool = True
+    opening_txid: Optional[int] = None
+    cancel_response_seen: bool = False
+    local_terminal_txid: Optional[int] = None
+    local_terminal_settled: bool = False
+    local_consumed: bool = False
+    peer_final_consumed: bool = False
     peer_credit: CreditPair = field(default_factory=CreditPair)
     recv_committed: int = 0
     recv_next: int = 0
@@ -188,6 +214,8 @@ class StreamState:
     send_offset: int = 0
     send_final: Optional[int] = None
     terminal_mode: str = "ACTIVE"
+    recv_terminal_mode: str = "ACTIVE"
+    send_terminal_mode: str = "ACTIVE"
     stream_error_code: Optional[int] = None
     recv_segments: Dict[int, bytes] = field(default_factory=dict)
     accepted_chunks: Dict[int, bytes] = field(default_factory=dict)
@@ -215,6 +243,8 @@ class IndependentSession:
         self.write_chunk = write_chunk
 
         self.session_id: Optional[bytes] = None
+        self.protocol_version: Optional[int] = None
+        self.supported_versions: Set[int] = {VERSION}
         self.client_limits: Optional[Limits] = None
         self.server_limits: Optional[Limits] = None
         self.peer_limits: Optional[Limits] = None
@@ -226,11 +256,16 @@ class IndependentSession:
         self.carrier_tasks: Dict[Tuple[int, int], asyncio.Task[None]] = {}
         self.highest_accepted: Dict[int, int] = {}
         self.highest_attempted: Dict[int, int] = {}
+        self.pending_candidates: Dict[int, int] = {}
         self.established_incarnations: List[Tuple[int, int]] = []
         self.lost_incarnations: List[Tuple[int, int]] = []
         self.ambiguous_attempts: List[Tuple[int, int]] = []
 
         self.streams: Dict[int, StreamState] = {}
+        self.opening_tombstones: Dict[int, Dict[str, object]] = {}
+        self.tombstones: Dict[int, Dict[str, object]] = {}
+        self.retired_stream_ids: Set[int] = set()
+        self.next_stream_id = 1
         self.next_txid = 1
         self.local_tx: Dict[int, TxState] = {}
         self.settled_through = 0
@@ -264,6 +299,7 @@ class IndependentSession:
         self.suppressed_faults: Set[Tuple[object, ...]] = set()
         self.ambiguous_faults: Set[Tuple[int, int]] = set()
         self.server_stop_txid: Optional[int] = None
+        self.dormant_retired = False
 
     def set_state(self, state: str, **extra: object) -> None:
         if self.state == state:
@@ -287,6 +323,8 @@ class IndependentSession:
         )
 
     def validate_server_candidate(self, init) -> None:
+        if self.dormant_retired and init.session_action == 1:
+            raise CandidateReject(ERROR_SESSION_NOT_FOUND, "retired DORMANT Session is no longer joinable")
         if self.state in {"CLOSING", "CLOSED"}:
             raise CandidateReject(ERROR_SESSION_CONFLICT, "Session is closing; no new candidate is admissible")
         if init.session_action == 0:
@@ -298,8 +336,9 @@ class IndependentSession:
 
         if init.session_action != 1:
             raise CandidateReject(ERROR_SESSION_CONFLICT, "invalid Session action")
-        if self.session_id is None or init.session_id != self.session_id:
-            raise CandidateReject(ERROR_SESSION_CONFLICT, "JOIN Session not found")
+        missing = self.dormant_retired or self.session_id is None or init.session_id != self.session_id
+        if missing:
+            raise CandidateReject(ERROR_SESSION_NOT_FOUND, "JOIN targets no retained Session")
         if self.client_limits is None or not self.limits_equal(init.client_limits, self.client_limits):
             raise CandidateReject(ERROR_SESSION_CONFLICT, "JOIN client limits changed")
 
@@ -319,6 +358,16 @@ class IndependentSession:
             if not current_active and active_count >= limit:
                 raise CandidateReject(ERROR_RESOURCE_LIMIT, "inactive replacement requires free Carrier slot")
 
+    def reserve_candidate(self, init) -> None:
+        pending = self.pending_candidates.get(init.carrier_id)
+        if pending is not None and pending >= init.generation:
+            raise CandidateReject(ERROR_CARRIER_CONFLICT, "candidate Generation conflicts with pending incarnation")
+        self.pending_candidates[init.carrier_id] = init.generation
+
+    def release_candidate(self, carrier_id: int, generation: int) -> None:
+        if self.pending_candidates.get(carrier_id) == generation:
+            self.pending_candidates.pop(carrier_id, None)
+
     def should_drop_server_finished(self, carrier_id: int, generation: int) -> bool:
         if self.role != "server" or self.scenario != "ambiguous-replacement":
             return False
@@ -330,9 +379,10 @@ class IndependentSession:
             return True
         return False
 
-    def commit_server_candidate(self, init) -> None:
+    def commit_server_candidate(self, init, version: int = VERSION) -> None:
         if init.session_action == 0:
             self.session_id = init.session_id
+            self.protocol_version = version
             self.client_limits = init.client_limits
             self.server_limits = self.local_limits
             self.peer_limits = init.client_limits
@@ -476,9 +526,25 @@ class IndependentSession:
             info["data_length"] = len(fields["data"])  # type: ignore[arg-type]
         self.trace.emit("frame_send", **info)
 
+    def _exhaust(self, what: str) -> None:
+        if self.state not in {"CLOSING", "CLOSED"}:
+            c = self.choose_carrier() if self.carriers else None
+            asyncio.create_task(self.fail_session(ERROR_RESOURCE_LIMIT, 0, f"RESOURCE_LIMIT: {what} exhausted", c))
+
+    def allocate_stream_id(self) -> int:
+        candidate = self.next_stream_id
+        if candidate > MAX_VARINT:
+            self._exhaust("Stream ID")
+            raise RuntimeError("Stream ID space exhausted")
+        self.next_stream_id = candidate + 2
+        return candidate
+
     def alloc_tx(self, frame_type: int, stream_id: int, **fields: object) -> TxState:
         txid = self.next_txid
-        self.next_txid += 1
+        if txid > MAX_VARINT:
+            self._exhaust("Transmission ID")
+            raise RuntimeError("Transmission ID space exhausted")
+        self.next_txid = txid + 1
         wire_fields = dict(fields)
         wire_fields["stream_id"] = stream_id
         wire_fields["transmission_id"] = txid
@@ -533,6 +599,9 @@ class IndependentSession:
             )
             return
         tx.settled = True
+        st = self.streams.get(tx.stream_id)
+        if st is not None and tx.frame_type in (FRAME_STREAM_FIN, FRAME_RESET_STREAM):
+            st.local_terminal_settled = True
         tx.event.set()
         self.trace.emit(
             "transmission_settled",
@@ -624,6 +693,12 @@ class IndependentSession:
             return True
         return False
 
+    def remember_ack(self, stream_id: int, txid: int) -> None:
+        self.peer_tx_confirmation[txid] = (
+            FRAME_TRANSMISSION_ACK,
+            {"stream_id": stream_id, "transmission_id": txid},
+        )
+
     async def acknowledge(
         self,
         incoming: Carrier,
@@ -631,6 +706,7 @@ class IndependentSession:
         txid: int,
         original_frame_type: int,
     ) -> None:
+        self.remember_ack(stream_id, txid)
         if self.should_suppress_confirmation(
             original_frame_type,
             {"stream_id": stream_id, "transmission_id": txid},
@@ -757,8 +833,51 @@ class IndependentSession:
             trigger_frame_type=trigger_frame_type,
             reason=reason,
         )
+        for active in list(self.carriers.values()):
+            await self._close_writer(active)
+        self.carriers.clear()
         self.set_state("CLOSED")
         self.done_event.set()
+
+    def retire_stream_to_tombstone(self, stream_id: int) -> Dict[str, object]:
+        stream = self.streams.pop(stream_id, None)
+        if stream is None:
+            raise RuntimeError("cannot tombstone absent Stream")
+        snapshot = {
+            "stream_id": stream_id,
+            "recv_final": stream.recv_final,
+            "send_final": stream.send_final,
+            "terminal_mode": stream.terminal_mode,
+            "recv_terminal_mode": stream.recv_terminal_mode,
+            "send_terminal_mode": stream.send_terminal_mode,
+            "opening_txid": stream.opening_txid,
+        }
+        self.tombstones[stream_id] = snapshot
+        self.trace.emit("stream_tombstoned", session_id=self.session_id.hex() if self.session_id else None, stream_id=stream_id)
+        return snapshot
+
+    def compact_tombstone(self, stream_id: int) -> None:
+        existed = self.tombstones.pop(stream_id, None)
+        if existed is None:
+            existed = self.opening_tombstones.pop(stream_id, None)
+        if existed is None:
+            raise RuntimeError("cannot compact unknown Stream identity")
+        self.retired_stream_ids.add(stream_id)
+        self.trace.emit("stream_identity_retired", session_id=self.session_id.hex() if self.session_id else None, stream_id=stream_id)
+
+    def retire_dormant(self) -> None:
+        if self.state != "DORMANT" or self.carriers:
+            raise RuntimeError("DORMANT retirement precondition failed")
+        self.dormant_retired = True
+        self.set_state("CLOSED", reason="dormant-retention-expired")
+
+    async def send_stream_consumed(self, stream: StreamState, carrier: Carrier) -> TxState:
+        if stream.recv_final is None:
+            raise RuntimeError("STREAM_CONSUMED requires established peer final size")
+        tx = self.alloc_tx(FRAME_STREAM_CONSUMED, stream.stream_id, final_offset=stream.recv_final)
+        stream.local_consumed = True
+        await self.send_tx(tx, carrier)
+        return tx
 
     async def handle_frame(
         self,
@@ -805,6 +924,8 @@ class IndependentSession:
             stream_id = int(fields["stream_id"])
             stream = self.streams.get(stream_id)
             if stream is None:
+                if stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+                    return
                 raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
@@ -820,6 +941,12 @@ class IndependentSession:
                 maximum=maximum,
                 result=result,
             )
+            if stream.lifecycle == "OPENING" and not stream.accepted:
+                stream.accepted = True
+                self.trace.emit("opening_acceptance_evidence", session_id=self.session_id.hex() if self.session_id else None, stream_id=stream_id, frame_type="STREAM_CREDIT")
+            elif stream.lifecycle == "OPENING_CANCEL_PENDING" and not stream.accepted:
+                stream.accepted = True
+                stream.lifecycle = "OPEN"
             stream.credit_event.set()
             return
 
@@ -834,13 +961,28 @@ class IndependentSession:
             if stream is None:
                 raise TransmissionError("OPEN_OK for unknown Stream")
             self.settle_tx(txid, "OPEN_OK", stream_id)
+            stream.accepted = True
+            stream.lifecycle = "OPEN"
             stream.open_event.set()
             return
 
         if frame_type == FRAME_STREAM_OPEN_REJECT:
             stream_id = int(fields["stream_id"])
             txid = int(fields["transmission_id"])
+            stream = self.streams.get(stream_id)
+            if stream is None:
+                if stream_id in self.opening_tombstones or stream_id in self.retired_stream_ids:
+                    return
+                raise StreamStateError("OPEN_REJECT for unknown Stream")
+            if stream.accepted:
+                raise StreamStateError("OPEN_REJECT cannot override prior acceptance evidence")
             self.settle_tx(txid, "OPEN_REJECT", stream_id)
+            self.streams.pop(stream_id, None)
+            self.opening_tombstones[stream_id] = {
+                "opening_txid": txid,
+                "decision": "cancelled" if stream.lifecycle == "OPENING_CANCEL_PENDING" else "rejected",
+                "error_code": int(fields["error_code"]),
+            }
             return
 
         if frame_type == FRAME_STREAM_DATA:
@@ -860,13 +1002,24 @@ class IndependentSession:
             return
 
         if frame_type == FRAME_STREAM_CONSUMED:
-            duplicate = self.register_peer_tx(frame_type, fields)
-            await self.acknowledge(
-                incoming,
-                int(fields["stream_id"]),
-                int(fields["transmission_id"]),
-                frame_type,
-            )
+            stream_id = int(fields["stream_id"])
+            txid = int(fields["transmission_id"])
+            final_offset = int(fields["final_offset"])
+            stream = self.streams.get(stream_id)
+            if stream is not None:
+                if stream.send_final is None or stream.send_final != final_offset:
+                    raise FinalSizeError("STREAM_CONSUMED does not match local final size")
+                stream.peer_final_consumed = True
+            else:
+                tomb = self.tombstones.get(stream_id)
+                if tomb is not None and tomb.get("send_final") != final_offset:
+                    raise FinalSizeError("STREAM_CONSUMED conflicts with tombstone")
+                if tomb is None and not (stream_id in self.retired_stream_ids and txid <= self.peer_retired_through):
+                    raise StreamStateError("STREAM_CONSUMED for unknown Stream")
+                if tomb is None:
+                    return
+            self.register_peer_tx(frame_type, fields)
+            await self.acknowledge(incoming, stream_id, txid, frame_type)
             return
 
         if frame_type == FRAME_TRANSMISSION_ACK:
@@ -883,6 +1036,9 @@ class IndependentSession:
                 )
             if value > self.peer_retired_through:
                 self.peer_retired_through = value
+                expired = [tx for tx in self.peer_tx_confirmation if tx <= value]
+                for tx in expired:
+                    del self.peer_tx_confirmation[tx]
             self.trace.emit(
                 "retire_received",
                 **incoming.base_trace(),
@@ -918,8 +1074,7 @@ class IndependentSession:
             return
 
         if frame_type == FRAME_PING:
-            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-            await self.send_frame(reply, FRAME_PONG, token=int(fields["token"]))
+            await self.send_frame(incoming, FRAME_PONG, token=int(fields["token"]))
             return
 
         if frame_type == FRAME_PONG:
@@ -934,6 +1089,8 @@ class IndependentSession:
             return
 
         if frame_type == FRAME_SESSION_CLOSE:
+            if self.state == "CLOSED":
+                return
             self.session_close_received = dict(fields)
             self.trace.emit(
                 "session_close_received",
@@ -942,6 +1099,11 @@ class IndependentSession:
                 trigger_frame_type=int(fields["trigger_frame_type"]),
                 reason=str(fields.get("reason", "")),
             )
+            self.set_state("CLOSING")
+            open_carriers = list(self.carriers.values())
+            for item in open_carriers:
+                await self._close_writer(item)
+            self.carriers.clear()
             self.set_state("CLOSED")
             self.done_event.set()
             return
@@ -956,6 +1118,12 @@ class IndependentSession:
         if stream_id <= 0 or (stream_id & 1) == 0:
             raise StreamStateError("peer used an invalid client Stream ID")
         duplicate = self.register_peer_tx(FRAME_STREAM_OPEN, fields)
+        if stream_id in self.opening_tombstones or stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            reject_fields = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_STATE}
+            await self.send_frame(reply, FRAME_STREAM_OPEN_REJECT, **reject_fields)
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, reject_fields)
+            return
         stream = self.streams.get(stream_id)
         if stream is not None and not duplicate:
             raise TransmissionError("new STREAM_OPEN Transmission conflicts with existing Stream identity")
@@ -974,7 +1142,7 @@ class IndependentSession:
             )
             return
         if stream is None:
-            stream = StreamState(stream_id=stream_id)
+            stream = StreamState(stream_id=stream_id, lifecycle="OPEN", accepted=True)
             self.streams[stream_id] = stream
             self.trace.emit(
                 "stream_created",
@@ -1020,7 +1188,22 @@ class IndependentSession:
         data = bytes(fields["data"])  # type: ignore[arg-type]
         stream = self.streams.get(stream_id)
         if stream is None:
+            tomb = self.tombstones.get(stream_id)
+            if tomb is not None:
+                final = tomb.get("recv_final")
+                end = offset + len(data)
+                if final is not None and end > int(final):
+                    raise FinalSizeError("stale DATA extends beyond tombstone")
+                duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
+                if not duplicate:
+                    self.application_duplicate_bytes_suppressed += len(data)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STREAM_DATA)
+                return
+            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
+                return
             raise StreamStateError("DATA for unknown Stream")
+        if stream.lifecycle in ("OPENING", "OPENING_CANCEL_PENDING") and not stream.accepted:
+            raise StreamStateError("DATA arrived before acceptance")
         end = offset + len(data)
         if stream.recv_final is not None and end > stream.recv_final:
             raise FinalSizeError("DATA exceeds established Final Offset")
@@ -1064,6 +1247,7 @@ class IndependentSession:
                     self.application_rx_bytes += len(chunk)
                 stream.recv_next = cursor
 
+        self.remember_ack(stream_id, txid)
         if self.should_suppress_confirmation(FRAME_STREAM_DATA, fields, incoming):
             return
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
@@ -1105,12 +1289,27 @@ class IndependentSession:
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
         final_offset = int(fields["final_offset"])
-        duplicate = self.register_peer_tx(FRAME_STREAM_FIN, fields)
         stream = self.streams.get(stream_id)
         if stream is None:
-            raise ProtocolError("FIN for unknown Stream")
+            tomb = self.tombstones.get(stream_id)
+            if tomb is not None:
+                if tomb.get("recv_final") != final_offset:
+                    raise FinalSizeError("FIN changes tombstone final size")
+                self.register_peer_tx(FRAME_STREAM_FIN, fields)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STREAM_FIN)
+                return
+            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
+                return
+            raise StreamStateError("FIN for unknown Stream")
+        if stream.lifecycle == "OPENING" and not stream.accepted:
+            if final_offset != 0:
+                raise StreamStateError("pre-acceptance FIN has non-zero final size")
+            stream.accepted = True
+        duplicate = self.register_peer_tx(FRAME_STREAM_FIN, fields)
         self.apply_terminal_receive(stream, final_offset, duplicate, "FIN")
+        stream.recv_terminal_mode = "FIN"
 
+        self.remember_ack(stream_id, txid)
         suppress = self.should_suppress_confirmation(FRAME_STREAM_FIN, fields, incoming)
         if (
             self.role == "server"
@@ -1146,12 +1345,40 @@ class IndependentSession:
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
         final_offset = int(fields["final_offset"])
-        duplicate = self.register_peer_tx(FRAME_RESET_STREAM, fields)
         stream = self.streams.get(stream_id)
         if stream is None:
-            raise ProtocolError("RESET for unknown Stream")
+            tomb = self.tombstones.get(stream_id)
+            if tomb is not None:
+                if tomb.get("recv_final") != final_offset:
+                    raise FinalSizeError("RESET changes tombstone final size")
+                self.register_peer_tx(FRAME_RESET_STREAM, fields)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_RESET_STREAM)
+                return
+            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
+                return
+            if self.role == "server" and final_offset == 0:
+                self.register_peer_tx(FRAME_RESET_STREAM, fields)
+                self.opening_tombstones[stream_id] = {"decision":"preopen-reset","recv_final":0,"terminal_txid":txid}
+                await self.acknowledge(incoming, stream_id, txid, FRAME_RESET_STREAM)
+                return
+            raise StreamStateError("RESET for unknown Stream")
+        if stream.lifecycle == "OPENING_CANCEL_PENDING" and not stream.accepted and final_offset == 0:
+            stream.cancel_response_seen = True
+            stream.recv_final = 0
+            stream.recv_terminal_mode = "RESET"
+            stream.terminal_mode = "RESET"
+            self.register_peer_tx(FRAME_RESET_STREAM, fields)
+            await self.acknowledge(incoming, stream_id, txid, FRAME_RESET_STREAM)
+            return
+        if stream.lifecycle == "OPENING" and not stream.accepted:
+            if final_offset != 0:
+                raise StreamStateError("pre-acceptance RESET has non-zero final size")
+            stream.accepted = True
+        duplicate = self.register_peer_tx(FRAME_RESET_STREAM, fields)
         self.apply_terminal_receive(stream, final_offset, duplicate, "RESET")
+        stream.recv_terminal_mode = "RESET"
         stream.stream_error_code = int(fields["stream_error_code"])
+        self.remember_ack(stream_id, txid)
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
         await self.send_frame(
             reply,
@@ -1164,11 +1391,24 @@ class IndependentSession:
     async def handle_stop_sending(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
-        duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
         stream = self.streams.get(stream_id)
         if stream is None:
-            raise ProtocolError("STOP_SENDING for unknown Stream")
+            if self.role == "server":
+                duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
+                self.opening_tombstones[stream_id] = {"decision":"preopen-stop","terminal_txid":txid}
+                reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+                self.remember_ack(stream_id, txid)
+                await self.send_frame(reply, FRAME_TRANSMISSION_ACK, stream_id=stream_id, transmission_id=txid, receiver_timestamp_us=reply.timestamp_us())
+                if not duplicate:
+                    reset = self.alloc_tx(FRAME_RESET_STREAM, stream_id, final_offset=0, stream_error_code=int(fields["stream_error_code"]))
+                    await self.send_tx(reset, reply)
+                return
+            raise StreamStateError("STOP_SENDING for unknown Stream")
+        if stream.lifecycle == "OPENING" and not stream.accepted:
+            stream.accepted = True
+        duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+        self.remember_ack(stream_id, txid)
         await self.send_frame(
             reply,
             FRAME_TRANSMISSION_ACK,
@@ -1185,6 +1425,8 @@ class IndependentSession:
                 stream_error_code=int(fields["stream_error_code"]),
             )
             stream.send_final = stream.send_offset
+            stream.send_terminal_mode = "RESET"
+            stream.local_terminal_txid = tx.txid
             stream.terminal_mode = "RESET"
             stream.stream_error_code = int(fields["stream_error_code"])
             await self.send_tx(tx, reply)
@@ -1193,13 +1435,40 @@ class IndependentSession:
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
         if self.state != "ACTIVE":
             raise RuntimeError("cannot create Stream outside ACTIVE Session state")
-        stream = StreamState(stream_id=stream_id)
+        if stream_id <= 0 or (stream_id & 1) == 0:
+            raise RuntimeError("invalid local Stream ID")
+        if stream_id in self.streams or stream_id in self.opening_tombstones or stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+            raise RuntimeError("Stream ID was already consumed")
+        stream = StreamState(stream_id=stream_id, lifecycle="OPENING", accepted=False)
         self.streams[stream_id] = stream
         tx = self.alloc_tx(FRAME_STREAM_OPEN, stream_id)
+        stream.opening_txid = tx.txid
         await self.send_tx(tx, carrier)
         await asyncio.wait_for(stream.open_event.wait(), timeout=10)
         await asyncio.wait_for(stream.credit_event.wait(), timeout=10)
         return stream
+
+    async def open_next_stream(self, carrier: Carrier) -> StreamState:
+        sid = self.allocate_stream_id()
+        return await self.open_stream(sid, carrier)
+
+    async def begin_preopen_cancel(self, stream_id: int, carrier: Carrier, reason: int = STREAM_REASON_TEST) -> StreamState:
+        if stream_id in self.streams or stream_id in self.opening_tombstones or stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+            raise RuntimeError("Stream ID was already consumed")
+        stream = StreamState(stream_id=stream_id, lifecycle="OPENING_CANCEL_PENDING", accepted=False)
+        self.streams[stream_id] = stream
+        opening = self.alloc_tx(FRAME_STREAM_OPEN, stream_id)
+        stream.opening_txid = opening.txid
+        cancel = self.alloc_tx(FRAME_STOP_SENDING, stream_id, stream_error_code=reason)
+        await self.send_tx(cancel, carrier)
+        return stream
+
+    async def send_pending_open(self, stream_id: int, carrier: Carrier) -> None:
+        stream = self.streams[stream_id]
+        txid = stream.opening_txid
+        if txid is None:
+            raise RuntimeError("no opening Transmission retained")
+        await self.send_tx(self.local_tx[txid], carrier)
 
     async def send_stream_credit(self, stream: StreamState, carrier: Carrier) -> None:
         await self.send_frame(
@@ -1270,6 +1539,9 @@ class IndependentSession:
             trigger_frame_type=0,
             reason=reason,
         )
+        for active in list(self.carriers.values()):
+            await self._close_writer(active)
+        self.carriers.clear()
         self.set_state("CLOSED")
         self.done_event.set()
 
@@ -1387,7 +1659,27 @@ async def client_handshake(
         session_action="CREATE" if session_action == 0 else "JOIN",
     )
 
-    message_type, _, server_init = await read_message(reader)
+    message_type, body, server_init = await read_message(reader)
+    if message_type == MSG_VERSION_NEGOTIATION:
+        count, cursor = vi_dec(body)
+        offered = []
+        for _ in range(count):
+            version_item, cursor = vi_dec(body, cursor)
+            offered.append(version_item)
+        if cursor != len(body):
+            raise ProtocolError("bad VERSION_NEGOTIATION body")
+        writer.close()
+        await writer.wait_closed()
+        session.trace.emit("version_negotiation_received", versions=offered, automatic_retry=False)
+        raise VersionNegotiationReceived(offered)
+    if message_type == MSG_HANDSHAKE_REJECT:
+        code, cursor = vi_dec(body)
+        if cursor != len(body):
+            raise ProtocolError("bad HANDSHAKE_REJECT body")
+        writer.close()
+        await writer.wait_closed()
+        session.trace.emit("handshake_reject_received", error_code=code, state_mutated=False)
+        raise HandshakeRejected(code)
     if message_type != MSG_SERVER_INIT:
         raise RuntimeError(f"expected SERVER_INIT, got {message_type}")
     server_nonce, server_limits = parse_server_init(server_init)
@@ -1410,7 +1702,7 @@ async def client_handshake(
     )
 
     try:
-        message_type, _, server_finished = await read_message(reader)
+        message_type, body, server_finished = await read_message(reader)
     except asyncio.IncompleteReadError as exc:
         writer.close()
         await writer.wait_closed()
@@ -1424,6 +1716,18 @@ async def client_handshake(
         )
         raise AmbiguousHandshake(carrier_id, generation) from exc
 
+    if message_type == MSG_HANDSHAKE_REJECT:
+        code, cursor = vi_dec(body)
+        if cursor != len(body):
+            raise ProtocolError("bad HANDSHAKE_REJECT body")
+        writer.close()
+        await writer.wait_closed()
+        session.trace.emit("handshake_reject_received", error_code=code, state_mutated=False)
+        raise HandshakeRejected(code)
+    if message_type == MSG_VERSION_NEGOTIATION:
+        writer.close()
+        await writer.wait_closed()
+        raise ProtocolError("VERSION_NEGOTIATION is invalid after SERVER_INIT")
     if message_type != MSG_SERVER_FINISHED:
         raise RuntimeError(f"expected SERVER_FINISHED, got {message_type}")
     h1 = hashlib.sha256(preface + client_init + server_init + client_finished).digest()
@@ -1445,6 +1749,7 @@ async def client_handshake(
         server_finished=server_finished,
     )
     if session.server_limits is None:
+        session.protocol_version = VERSION
         session.server_limits = server_limits
         session.client_limits = session.local_limits
         session.peer_limits = server_limits
@@ -1488,15 +1793,40 @@ async def server_handshake(
     if magic != MAGIC:
         raise ProtocolError("invalid MPX magic")
     version, version_raw = await read_varint(reader)
-    if version != VERSION:
-        raise ProtocolError("unsupported Protocol Version")
+    if version not in session.supported_versions:
+        versions = tuple(sorted(session.supported_versions, reverse=True))
+        payload = vi_enc(len(versions)) + b"".join(map(vi_enc, versions))
+        await write_raw(writer, encode_message(MSG_VERSION_NEGOTIATION, payload), session.write_chunk)
+        session.trace.emit("version_negotiation_sent", requested_version=version, supported_versions=list(versions))
+        writer.close()
+        await writer.wait_closed()
+        return None
     preface = magic + version_raw
 
     message_type, _, client_init = await read_message(reader)
     if message_type != MSG_CLIENT_INIT:
         raise ProtocolError("expected CLIENT_INIT")
     init = parse_client_init(client_init)
-    session.validate_server_candidate(init)
+    if session.protocol_version is not None and version != session.protocol_version:
+        rejection = CandidateReject(ERROR_SESSION_CONFLICT, "JOIN Protocol Version mismatches retained Session")
+    else:
+        rejection = None
+        try:
+            session.validate_server_candidate(init)
+        except CandidateReject as exc:
+            rejection = exc
+    if rejection is not None:
+        reject_wire = encode_message(MSG_HANDSHAKE_REJECT, vi_enc(rejection.error_code))
+        await write_raw(writer, reject_wire, session.write_chunk)
+        session.trace.emit("handshake_reject_sent", error_code=rejection.error_code, carrier_id=init.carrier_id, generation=init.generation)
+        raise rejection
+    try:
+        session.reserve_candidate(init)
+    except CandidateReject as rejection:
+        reject_wire = encode_message(MSG_HANDSHAKE_REJECT, vi_enc(rejection.error_code))
+        await write_raw(writer, reject_wire, session.write_chunk)
+        session.trace.emit("handshake_reject_sent", error_code=rejection.error_code, carrier_id=init.carrier_id, generation=init.generation)
+        raise
     session.trace.emit(
         "handshake_recv",
         stage="CLIENT_INIT",
@@ -1506,27 +1836,22 @@ async def server_handshake(
         session_action="CREATE" if init.session_action == 0 else "JOIN",
     )
 
-    server_nonce = secrets.token_bytes(32)
-    server_init = encode_server_init(server_nonce, session.local_limits)
-    await write_raw(writer, server_init, session.write_chunk)
-
-    expected_client_finished, server_finished_template, h0, prelim = derive_traffic(
-        key,
-        preface,
-        client_init,
-        server_init,
-    )
-    message_type, _, client_finished = await read_message(reader)
-    if message_type != MSG_CLIENT_FINISHED:
-        raise ProtocolError("expected CLIENT_FINISHED")
-    validate_finished(
-        client_finished,
-        MSG_CLIENT_FINISHED,
-        prelim.client_finished_key,
-        h0,
-    )
-    if client_finished != expected_client_finished:
-        raise AuthenticationError("CLIENT_FINISHED not canonical for transcript")
+    try:
+        server_nonce = secrets.token_bytes(32)
+        server_init = encode_server_init(server_nonce, session.local_limits)
+        await write_raw(writer, server_init, session.write_chunk)
+        expected_client_finished, server_finished_template, h0, prelim = derive_traffic(
+            key, preface, client_init, server_init
+        )
+        message_type, _, client_finished = await read_message(reader)
+        if message_type != MSG_CLIENT_FINISHED:
+            raise ProtocolError("expected CLIENT_FINISHED")
+        validate_finished(client_finished, MSG_CLIENT_FINISHED, prelim.client_finished_key, h0)
+        if client_finished != expected_client_finished:
+            raise AuthenticationError("CLIENT_FINISHED not canonical for transcript")
+    except Exception:
+        session.release_candidate(init.carrier_id, init.generation)
+        raise
 
     _, server_finished, _, traffic = derive_traffic(
         key,
@@ -1541,7 +1866,8 @@ async def server_handshake(
     # Server commits the candidate when it reaches its ESTABLISHED transition.
     # The ambiguity fault is injected after this commit but before the Client can
     # authenticate SERVER_FINISHED.
-    session.commit_server_candidate(init)
+    session.commit_server_candidate(init, version)
+    session.release_candidate(init.carrier_id, init.generation)
     if session.should_drop_server_finished(init.carrier_id, init.generation):
         session.trace.emit(
             "fault_drop_server_finished",

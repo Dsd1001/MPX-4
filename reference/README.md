@@ -6,7 +6,7 @@ It is **not** a production proxy, Relay, scheduler implementation, performance b
 
 ## Current gate
 
-The reference implementation completes Gate 1 and Gate 2 runtime scenarios. Gate 3 is a **mixed-evidence 121-case A–L profile**: every case is labeled `model`, `codec`, `endpoint-wire`, or `cross-wire`, and review-driven receive/error-scope cases require authenticated endpoint-wire execution rather than model-only evidence. Gate 4 is driven by the neutral `interop/` harness against the source-isolated peer in `independent/`.
+The reference implementation completes Gate 1 and Gate 2 runtime scenarios. Gate 3 is now a **model-zero executable 121-case A–L profile**: every Mandatory case is backed by codec, endpoint-wire, or cross-wire execution. The current split is 18 codec, 30 cross-wire, 73 endpoint-wire, and 0 model-only. Gate 4 is driven by the neutral `interop/` harness against the source-isolated peer in `independent/`.
 
 Implemented runtime subset:
 
@@ -37,15 +37,17 @@ Gate 2 adds five real-TCP deterministic scenarios using separate Client and Serv
 
 The same Gate 2 suite is also run with deterministic endpoint TCP write fragmentation (`--write-chunk 257`).
 
-Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5, B1–B17, C1–C7, D1–D10, E1–E10, F1–F8, G1–G6, H1–H5, I1–I6, J1–J16, K1–K6, and L1–L25. The current reference profile reports **18 codec, 30 cross-wire, 27 endpoint-wire, and 46 model** case IDs. The model-only IDs are included explicitly in `gate3-report.json`; they remain oracle/state evidence and are not presented as endpoint acceptance.
+Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5, B1–B17, C1–C7, D1–D10, E1–E10, F1–F8, G1–G6, H1–H5, I1–I6, J1–J16, K1–K6, and L1–L25. The current reference profile reports **18 codec, 30 cross-wire, 73 endpoint-wire, and 0 model** case IDs. The former 46 model-only IDs now have real runtime evidence: 42 IDs are exercised by `interop/endpoint_mandatory.py`, while E4, F3, J7, and K6 reuse existing authenticated endpoint-wire cases.
 
-`interop/endpoint_wire.py` runs the real Session runtimes over loopback TCP, completes CREATE/Finished, sends authenticated Secure Records, and verifies both endpoint roles where the rule is role-symmetric. It covers Final Offset versus DATA, RESET application-delivery suppression, Stream/Session credit pair merge and window structure, Session aggregate commitment, overlapping byte identity, Transmission-ID conflicts, Record flags/encoding Carrier scope, Stream lifecycle/limit, candidate collision, error scope/Trigger Frame Type, and shutdown blocking new work. The aggregate suite currently executes **96 cases across A/B and Client/Server roles**.
+`interop/endpoint_wire.py` runs the real Session runtimes over loopback TCP, completes CREATE/Finished, sends authenticated Secure Records, and verifies both endpoint roles where the rule is role-symmetric. It covers Final Offset versus DATA, RESET application-delivery suppression, Stream/Session credit pair merge and window structure, Session aggregate commitment, overlapping byte identity, Transmission-ID conflicts, Record flags/encoding Carrier scope, Stream lifecycle/limit, candidate collision, error scope/Trigger Frame Type, and shutdown blocking new work. The baseline aggregate suite executes **96 cases across A/B and Client/Server roles**.
+
+`interop/endpoint_mandatory.py` removes the remaining model-only Mandatory evidence. It executes real runtime behavior for JOIN consistency, Session Protocol Version, VERSION_NEGOTIATION and HANDSHAKE_REJECT, identifier exhaustion, Carrier slot/replacement rules, retirement/confirmation retention, opening races, tombstones, STREAM_CONSUMED, DORMANT retention, candidate concurrency, EOF/half-close, and Session/Carrier close behavior. It contributes **43 executions per implementation / 86 total** and covers 42 unique formerly-model-only Mandatory IDs.
 
 `interop/endpoint_sensitivity.py` deliberately breaks four real handler contracts in each runtime (`fail_session`, crossed-credit rejection, Final Offset enforcement, RESET delivery suppression). The suite passes only if the guarded endpoint-wire case then fails; there are **8 sensitivity controls**.
 
-Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both mixed-evidence 121-case profiles, 96 authenticated endpoint-wire executions, eight sensitivity controls, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes.
+Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both model-zero 121-case profiles, **182 authenticated endpoint executions** (96 baseline + 86 formerly-model-only), eight sensitivity controls, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes.
 
-The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. Gate 4 PASS must not be summarized as complete endpoint execution of all 121 Mandatory cases while model-only entries remain. Passing these gates also does not itself declare Protocol Version 4 stable.
+The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. No Mandatory case is model-only, but 18 codec and 30 cross-wire cases remain deliberately classified by their correct executable surface rather than being mislabeled endpoint-wire. Passing these gates also does not itself declare Protocol Version 4 stable.
 
 ## Files
 
@@ -91,12 +93,13 @@ Run the same Gate 2 scenarios while fragmenting endpoint TCP writes:
       --out-dir /tmp/mpx4-gate2-fragmented \
       --write-chunk 257
 
-Run authenticated endpoint-wire conformance and sensitivity controls:
+Run authenticated endpoint conformance and sensitivity controls:
 
     python -m interop.endpoint_wire --out-dir /tmp/mpx4-endpoint-wire
+    python -m interop.endpoint_mandatory --out-dir /tmp/mpx4-endpoint-mandatory
     python -m interop.endpoint_sensitivity --out-dir /tmp/mpx4-endpoint-sensitivity
 
-Run the mixed-evidence 121-case Mandatory profile:
+Run the model-zero 121-case Mandatory profile:
 
     python -m reference.gate3_harness --out-dir /tmp/mpx4-gate3
 
@@ -135,7 +138,7 @@ Current gate status:
 - **Gate 0: PASS** — codec/crypto/vector baseline and mutation validation;
 - **Gate 1: PASS** — reference Client ↔ reference Server positive real-TCP integration, direct and fragmented;
 - **Gate 2: PASS** — deterministic multi-Carrier/fault/recovery scenario suite, direct and fragmented;
-- **Gate 3 profile: PASS** — 121/121 case IDs with explicit mixed evidence; current profile includes model-only cases and does not equate them with endpoint acceptance;
-- **Gate 4 aggregate: PASS** — source-isolated A/B role reversal plus authenticated endpoint-wire and sensitivity evidence, with the same mixed-evidence boundary.
+- **Gate 3 profile: PASS** — 121/121 case IDs with **0 model-only**; evidence split is 18 codec + 30 cross-wire + 73 endpoint-wire;
+- **Gate 4 aggregate: PASS** — source-isolated A/B role reversal plus 182 authenticated endpoint executions, eight sensitivity controls, and direct/fragmented cross-fault evidence.
 
-The repository therefore has materially stronger Draft 11 runtime interoperability evidence, but it does **not** claim complete Mandatory Core endpoint interoperability while model-only case IDs remain. Protocol Version 4 remains a development version until a separate Stability Declaration is made.
+The repository now has executable evidence for every Draft 11 Mandatory case without a model-only fallback. This is still not a third-party independence claim, and it does not mean all 121 cases are endpoint-wire tests. Protocol Version 4 remains a development version until a separate Stability Declaration is made.

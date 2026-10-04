@@ -38,9 +38,11 @@ jobs:
         run: python reference/gate2_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate2-fragmented" --write-chunk 257
       - name: Authenticated endpoint-wire negative and positive controls
         run: python -m interop.endpoint_wire --out-dir "$RUNNER_TEMP/mpx4-endpoint-wire"
+      - name: Formerly-model-only Mandatory endpoint execution
+        run: python -m interop.endpoint_mandatory --out-dir "$RUNNER_TEMP/mpx4-endpoint-mandatory"
       - name: Endpoint coverage sensitivity controls
         run: python -m interop.endpoint_sensitivity --out-dir "$RUNNER_TEMP/mpx4-endpoint-sensitivity"
-      - name: Reference Gate 3 mixed-evidence Mandatory profile
+      - name: Reference Gate 3 model-zero Mandatory profile
         run: python -m reference.gate3_harness --out-dir "$RUNNER_TEMP/mpx4-gate3"
       - name: Independent implementation canonical self-test
         run: python -m independent.selftest

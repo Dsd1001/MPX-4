@@ -23,7 +23,7 @@ The conformance/fault harnesses intentionally exercise the same published Mandat
 - selftest.py — canonical vector reproduction using Implementation B.
 - basic_harness.py — B↔B basic real-TCP integration harness.
 - fault_harness.py — B↔B five-scenario fault/recovery harness.
-- profile.py — 121-case A–L mixed-evidence profile for Implementation B; each case is labeled model/codec/endpoint-wire/cross-wire and model-only IDs remain explicit.
+- profile.py — 121-case A–L executable-evidence profile for Implementation B; current classification is 18 codec, 30 cross-wire, 73 endpoint-wire, and 0 model-only.
 
 ## Run
 
@@ -43,11 +43,12 @@ Run B↔B fault/recovery integration:
 
     python independent/fault_harness.py --out-dir /tmp/mpx4-b-fault
 
-Run authenticated endpoint-wire conformance for Implementation B:
+Run authenticated endpoint conformance for Implementation B:
 
     python -m interop.endpoint_wire --implementation independent --out-dir /tmp/mpx4-b-endpoint-wire
+    python -m interop.endpoint_mandatory --implementation independent --out-dir /tmp/mpx4-b-endpoint-mandatory
 
-Run the Implementation B mixed-evidence Mandatory profile:
+Run the Implementation B model-zero Mandatory profile:
 
     python -m independent.profile --out-dir /tmp/mpx4-b-profile
 
@@ -55,4 +56,4 @@ Run aggregate Gate 4 A/B interoperability:
 
     python -m interop.gate4_harness --out-dir /tmp/mpx4-gate4
 
-A successful Implementation B profile reports all 121/121 A–L case IDs PASS together with evidence-class counts and an explicit `model_only_case_ids` list. Review-sensitive receive/error-scope cases require real authenticated endpoint-wire executions. Aggregate Gate 4 additionally requires both profiles, 96 A/B endpoint-wire executions, eight deliberate-defect sensitivity controls, and both role directions for the basic and five fault scenarios in direct and fragmented-write modes. This is not described as complete endpoint execution of all 121 cases while model-only entries remain.
+A successful Implementation B profile reports all 121/121 A–L case IDs PASS with `model_only_case_ids=[]` and evidence counts of 18 codec, 30 cross-wire, and 73 endpoint-wire. Aggregate Gate 4 additionally requires 182 authenticated endpoint executions across A/B, eight deliberate-defect sensitivity controls, and both role directions for the basic and five fault scenarios in direct and fragmented-write modes. This does not claim that all 121 Mandatory cases are endpoint-wire tests or that Implementation B was developed by an external organization.

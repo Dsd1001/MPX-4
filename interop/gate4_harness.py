@@ -151,8 +151,10 @@ def verify_profile(report: dict, label: str) -> dict:
     model_only = report.get("model_only_case_ids") or []
     endpoint_ids = report.get("endpoint_wire_mandatory_case_ids") or []
     check(len(model_only) == int(evidence_counts["model"]), f"{label} model-only count")
+    check(not model_only and int(evidence_counts["model"]) == 0, f"{label} still has model-only Mandatory cases")
     check(len(endpoint_ids) == int(evidence_counts["endpoint-wire"]), f"{label} endpoint-wire count")
-    check(int(report.get("endpoint_wire_execution_count") or 0) >= 48, f"{label} endpoint-wire executions")
+    check(int(evidence_counts["endpoint-wire"]) == 73, f"{label} endpoint-wire Mandatory count")
+    check(int(report.get("endpoint_wire_execution_count") or 0) >= 91, f"{label} endpoint-wire executions")
     return {
         "status": "PASS",
         "mandatory_case_count": MANDATORY_COUNT,
@@ -241,6 +243,7 @@ def execute(out_dir: Path) -> dict:
     )
 
     endpoint_wire_dir = out_dir / "endpoint-wire-both"
+    endpoint_mandatory_dir = out_dir / "endpoint-mandatory-both"
     sensitivity_dir = out_dir / "endpoint-sensitivity"
     run([
         sys.executable,
@@ -251,7 +254,18 @@ def execute(out_dir: Path) -> dict:
     ])
     endpoint_wire = read(endpoint_wire_dir / "endpoint-wire-report.json")
     check(endpoint_wire.get("status") == "PASS", "aggregate endpoint-wire suite failed")
-    check(endpoint_wire.get("execution_count") == 96, "expected 96 authenticated endpoint-wire executions")
+    check(endpoint_wire.get("execution_count") == 96, "expected 96 baseline authenticated endpoint-wire executions")
+    run([
+        sys.executable,
+        "-m",
+        "interop.endpoint_mandatory",
+        "--out-dir",
+        str(endpoint_mandatory_dir),
+    ])
+    endpoint_mandatory = read(endpoint_mandatory_dir / "endpoint-mandatory-report.json")
+    check(endpoint_mandatory.get("status") == "PASS", "formerly-model-only endpoint suite failed")
+    check(endpoint_mandatory.get("execution_count") == 86, "expected 86 A/B formerly-model-only endpoint executions")
+    check(len(endpoint_mandatory.get("covered_mandatory_ids") or []) == 42, "formerly-model-only suite ID coverage")
     run([
         sys.executable,
         "-m",
@@ -292,8 +306,10 @@ def execute(out_dir: Path) -> dict:
         "implementation_b_dependency_audit": audit,
         "authenticated_endpoint_wire": {
             "status": endpoint_wire["status"],
-            "execution_count": endpoint_wire["execution_count"],
-            "evidence_class": endpoint_wire.get("evidence_class"),
+            "baseline_execution_count": endpoint_wire["execution_count"],
+            "formerly_model_only_execution_count": endpoint_mandatory["execution_count"],
+            "total_execution_count": int(endpoint_wire["execution_count"]) + int(endpoint_mandatory["execution_count"]),
+            "formerly_model_only_covered_ids": endpoint_mandatory.get("covered_mandatory_ids", []),
         },
         "endpoint_coverage_sensitivity": {
             "status": sensitivity["status"],
@@ -307,21 +323,22 @@ def execute(out_dir: Path) -> dict:
         "mandatory_result": {
             "implementation_a_profile": "121/121 PASS",
             "implementation_b_profile": "121/121 PASS",
-            "groups_a_through_l": "PASS for both mixed-evidence profiles",
+            "groups_a_through_l": "PASS for both executable-evidence profiles",
             "evidence_counts_per_implementation": ref_profile["evidence_counts"],
-            "complete_endpoint_mandatory_acceptance": False,
-            "reason": "model-only Mandatory case IDs remain explicitly reported by each profile",
+            "model_only_case_count": 0,
+            "complete_executable_mandatory_profile": True,
+            "all_121_cases_are_endpoint_wire": False,
+            "evidence_boundary": "18 codec, 30 cross-wire, 73 endpoint-wire Mandatory case IDs per implementation",
         },
         "claim": (
-            "Gate 4 aggregate PASS: both source-isolated runtimes pass the mixed-evidence 121-case A-L profile; "
-            "96 authenticated endpoint-wire executions and eight deliberate-defect sensitivity controls pass; "
-            "A/B real-TCP role reversal passes the basic and five fault profiles in direct and fragmented modes."
+            "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
+            "96 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and eight deliberate-defect "
+            "sensitivity controls pass; A/B real-TCP role reversal passes the basic and five fault profiles in direct and fragmented modes."
         ),
         "claim_boundary": (
-            "This result does not claim complete endpoint execution of every Mandatory case. Cases classified as model-only "
-            "remain oracle/state evidence and are listed in each profile; therefore Gate 4 must not be summarized as complete "
-            "Mandatory Core endpoint interoperability. Implementation B also shares this repository, fixtures, and test design "
-            "with Implementation A, so no external organizational independence is claimed."
+            "No Mandatory case is model-only, but not every Mandatory case is classified endpoint-wire: codec and cross-wire evidence remain "
+            "the appropriate executable evidence for 48 cases. Implementation B shares this repository, fixtures, and test design with "
+            "Implementation A, so no external organizational independence is claimed."
         ),
     }
 
@@ -342,7 +359,7 @@ def main() -> int:
         print(
             "Gate 4 aggregate: PASS "
             "(A profile=121/121, B profile=121/121, "
-            f"endpoint-wire={report['authenticated_endpoint_wire']['execution_count']}, "
+            f"endpoint-wire={report['authenticated_endpoint_wire']['total_execution_count']}, "
             f"sensitivity={report['endpoint_coverage_sensitivity']['control_count']}, "
             f"{report['cross_basic_run_count']} cross-basic, "
             f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
