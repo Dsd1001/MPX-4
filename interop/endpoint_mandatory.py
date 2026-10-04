@@ -17,8 +17,11 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import secrets
 import socket
+import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
@@ -886,6 +889,75 @@ async def case_terminal_confirmation_replay(implementation: str) -> dict:
         return {"confirmation_replayed": True, "retired_through": tx}
 
 
+async def cli_failed_candidate_preserves_established_session(implementation: str) -> dict:
+    helper = Fixture(implementation, "server")
+    module = "reference.gate2_runtime" if implementation == "reference" else "independent.gate_runtime"
+    with tempfile.TemporaryDirectory(prefix=f"mpx4-{implementation}-candidate-") as tmp:
+        tmp_path = Path(tmp)
+        env = dict(os.environ)
+        env["MPX4_REF_PSK_HEX"] = helper.key.hex()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-B",
+            "-m",
+            module,
+            "server",
+            "--scenario",
+            "multi-carrier-reinjection",
+            "--port",
+            "0",
+            "--timeout",
+            "3",
+            "--trace",
+            str(tmp_path / "server.jsonl"),
+            "--result",
+            str(tmp_path / "result.json"),
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        peer = None
+        try:
+            check(proc.stdout is not None, "CLI server stdout unavailable")
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=3)
+            ready = json.loads(line)
+            helper.port = int(ready["port"])
+            carrier = await helper._peer_client_handshake(0, 1, 0)
+            peer = Peer(helper.core, carrier, [])
+            await peer.recv_until(helper.core.FRAME_SESSION_CREDIT)
+            await helper.ping(peer, 0x1502)
+            result = await helper.raw_candidate(
+                action=1,
+                carrier_id=96,
+                generation=0,
+                corrupt_finished=True,
+                complete=True,
+            )
+            check(result.get("finished_result") == "closed", result)
+            await asyncio.sleep(0.10)
+            check(proc.returncode is None, f"CLI server exited after failed candidate: {proc.returncode}")
+            await helper.ping(peer, 0x1503)
+            return {
+                "candidate_closed": True,
+                "server_still_running": True,
+                "retained_carrier_ping": True,
+            }
+        finally:
+            if peer is not None:
+                peer.carrier.writer.close()
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=1)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            if proc.stderr is not None:
+                await proc.stderr.read()
+
+
 async def case_failed_candidate_nonmutating(implementation: str) -> dict:
     async with Fixture(implementation, "server") as f:
         p = await f.establish()
@@ -902,7 +974,8 @@ async def case_failed_candidate_nonmutating(implementation: str) -> dict:
         check(snapshot(f) == before, (before, snapshot(f)))
         check(not f.session.pending_candidates, f.session.pending_candidates)
         await f.ping(p, 0x1501)
-        return {"non_mutating": True}
+    cli = await cli_failed_candidate_preserves_established_session(implementation)
+    return {"non_mutating": True, "cli": cli}
 
 
 async def case_stale_generation(implementation: str) -> dict:

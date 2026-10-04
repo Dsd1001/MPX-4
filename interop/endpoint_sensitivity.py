@@ -161,14 +161,14 @@ async def mutation_reset_delivery_reenabled(implementation: str) -> dict:
     async def broken(self, incoming, fields):
         stream_id = int(fields["stream_id"])
         stream = self.streams.get(stream_id)
-        saved = None if stream is None else stream.terminal_mode
-        if stream is not None and stream.terminal_mode == "RESET":
-            stream.terminal_mode = "ACTIVE"
+        saved = None if stream is None else stream.recv_terminal_mode
+        if stream is not None and stream.recv_terminal_mode == "RESET":
+            stream.recv_terminal_mode = "ACTIVE"
         try:
             return await original(self, incoming, fields)
         finally:
             if stream is not None:
-                stream.terminal_mode = saved
+                stream.recv_terminal_mode = saved
 
     cls.handle_stream_data = broken
     try:
@@ -185,11 +185,100 @@ async def mutation_reset_delivery_reenabled(implementation: str) -> dict:
     }
 
 
+async def mutation_stop_sending_conflates_receive_direction(implementation: str) -> dict:
+    cls = session_class(implementation)
+    original = cls.handle_stop_sending
+
+    async def broken(self, incoming, fields):
+        await original(self, incoming, fields)
+        stream = self.streams.get(int(fields["stream_id"]))
+        if stream is not None:
+            stream.recv_terminal_mode = "RESET"
+
+    cls.handle_stop_sending = broken
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "stop-sending-directionality",
+        )
+    finally:
+        cls.handle_stop_sending = original
+    return {
+        "mutation": "stop_sending_conflates_receive_direction",
+        "guard_case": "stop-sending-directionality",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_overlap_reassembly_exact_offset_only(implementation: str) -> dict:
+    cls = session_class(implementation)
+    helper_name = "drain_contiguous_receive_data" if implementation == "reference" else "flush_contiguous_chunks"
+    original = getattr(cls, helper_name)
+
+    def broken(self, stream):
+        while stream.recv_next in stream.recv_segments:
+            chunk = stream.recv_segments.pop(stream.recv_next)
+            stream.recv_data.extend(chunk)
+            stream.recv_next += len(chunk)
+            self.application_rx_bytes += len(chunk)
+
+    setattr(cls, helper_name, broken)
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "legal-overlap-reassembly",
+        )
+    finally:
+        setattr(cls, helper_name, original)
+    return {
+        "mutation": "overlap_reassembly_exact_offset_only",
+        "guard_case": "legal-overlap-reassembly",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_terminal_credit_final_check_bypassed(implementation: str) -> dict:
+    runtime = runtime_module(implementation)
+    cls = session_class(implementation)
+    original = cls.handle_frame
+
+    async def broken(self, incoming, frame_type, fields):
+        stream = None
+        saved = None
+        if frame_type == runtime.FRAME_STREAM_CREDIT:
+            stream = self.streams.get(int(fields["stream_id"]))
+            if stream is not None:
+                saved = stream.send_final
+                stream.send_final = None
+        try:
+            return await original(self, incoming, frame_type, fields)
+        finally:
+            if stream is not None:
+                stream.send_final = saved
+
+    cls.handle_frame = broken
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "terminal-credit-beyond-final",
+        )
+    finally:
+        cls.handle_frame = original
+    return {
+        "mutation": "terminal_credit_final_check_bypassed",
+        "guard_case": "terminal-credit-beyond-final",
+        "observed_failure": observed,
+    }
+
+
 MUTATIONS: List[Callable[[str], Awaitable[dict]]] = [
     mutation_fail_session_noop,
     mutation_crossed_credit_accepted,
     mutation_final_offset_bypassed,
     mutation_reset_delivery_reenabled,
+    mutation_stop_sending_conflates_receive_direction,
+    mutation_overlap_reassembly_exact_offset_only,
+    mutation_terminal_credit_final_check_bypassed,
 ]
 
 

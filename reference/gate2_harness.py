@@ -155,8 +155,9 @@ def verify_scenario(
     elif scenario == "fin-reset-retire":
         cstream = client["streams"]["1"]
         sstream = server["streams"]["1"]
-        check(cstream["terminal_mode"] == "RESET", "client send side did not adopt RESET semantics")
-        check(sstream["terminal_mode"] == "RESET", "server receive side did not preserve RESET semantics")
+        check(cstream["send_terminal_mode"] == "RESET", "client send side did not adopt RESET semantics")
+        check(cstream["recv_terminal_mode"] != "RESET", "client receive side was incorrectly terminated by STOP_SENDING")
+        check(sstream["recv_terminal_mode"] == "RESET", "server receive side did not preserve RESET semantics")
         check(cstream["send_final"] == 10, "client final offset mismatch")
         check(sstream["recv_final"] == 10, "server final offset mismatch")
         check(client["settled_through"] >= 3, "client settled prefix did not cross FIN/RESET")

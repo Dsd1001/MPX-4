@@ -970,6 +970,8 @@ class Gate2Session:
                 raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
+            if stream.send_final is not None and consumed > stream.send_final:
+                raise FinalSizeError("STREAM_CREDIT Consumed Offset exceeds local Final Offset")
             stream.peer_consumed, stream.peer_maximum, merge_result = self.merge_credit_pair(
                 stream.peer_consumed,
                 stream.peer_maximum,
@@ -1237,6 +1239,34 @@ class Gate2Session:
             if new_slice != old_slice:
                 raise ProtocolError("conflicting overlapping Stream bytes")
 
+    def remember_received_chunk(self, stream: StreamState, offset: int, data: bytes) -> None:
+        previous = stream.recv_history.get(offset)
+        if previous is None or len(data) > len(previous):
+            stream.recv_history[offset] = data
+        pending = stream.recv_segments.get(offset)
+        if pending is None or len(data) > len(pending):
+            stream.recv_segments[offset] = data
+
+    def drain_contiguous_receive_data(self, stream: StreamState) -> None:
+        while True:
+            candidates = [
+                (start, chunk)
+                for start, chunk in stream.recv_history.items()
+                if start <= stream.recv_next < start + len(chunk)
+            ]
+            if not candidates:
+                break
+            start, chunk = max(candidates, key=lambda item: item[0] + len(item[1]))
+            tail = chunk[stream.recv_next - start :]
+            if not tail:
+                break
+            stream.recv_data.extend(tail)
+            stream.recv_next += len(tail)
+            self.application_rx_bytes += len(tail)
+        for start, chunk in list(stream.recv_segments.items()):
+            if start + len(chunk) <= stream.recv_next:
+                stream.recv_segments.pop(start, None)
+
     async def handle_stream_data(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         offset = int(fields["offset"])
@@ -1269,7 +1299,7 @@ class Gate2Session:
         duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
         if not duplicate:
             self.validate_stream_byte_identity(stream, offset, data)
-            stream.recv_history[offset] = data
+            self.remember_received_chunk(stream, offset, data)
             old_committed = stream.recv_committed
             new_committed = max(stream.recv_committed, end)
             delta = new_committed - old_committed
@@ -1278,7 +1308,7 @@ class Gate2Session:
             self.session_recv_committed += delta
             stream.recv_committed = new_committed
 
-            if stream.terminal_mode == "RESET":
+            if stream.recv_terminal_mode == "RESET":
                 self.application_duplicate_bytes_suppressed += len(data)
                 self.trace.emit(
                     "application_delivery_suppressed",
@@ -1289,15 +1319,7 @@ class Gate2Session:
                     data_length=len(data),
                 )
             else:
-                existing = stream.recv_segments.get(offset)
-                if existing is not None and existing != data:
-                    raise TransmissionError("conflicting Stream bytes")
-                stream.recv_segments[offset] = data
-                while stream.recv_next in stream.recv_segments:
-                    chunk = stream.recv_segments.pop(stream.recv_next)
-                    stream.recv_data.extend(chunk)
-                    stream.recv_next += len(chunk)
-                    self.application_rx_bytes += len(chunk)
+                self.drain_contiguous_receive_data(stream)
         else:
             self.application_duplicate_bytes_suppressed += len(data)
 
@@ -1347,9 +1369,9 @@ class Gate2Session:
             self.session_recv_committed += delta
             stream.recv_committed = max(stream.recv_committed, final_offset)
             stream.recv_final = final_offset
+        if stream.recv_terminal_mode != "RESET":
             stream.recv_terminal_mode = "FIN"
-            if stream.terminal_mode != "RESET":
-                stream.terminal_mode = "FIN"
+            stream.terminal_mode = "FIN"
 
         self.retain_ack(stream_id, txid)
         suppress = self.should_suppress_confirmation(FRAME_STREAM_FIN, fields, incoming)
@@ -1490,7 +1512,7 @@ class Gate2Session:
             receiver_timestamp_us=reply.timestamp_us(),
         )
         stream.stop_received_event.set()
-        if not duplicate and stream.terminal_mode != "RESET":
+        if not duplicate and stream.send_terminal_mode != "RESET":
             tx = self.alloc_tx(
                 FRAME_RESET_STREAM,
                 stream_id,
@@ -1500,7 +1522,6 @@ class Gate2Session:
             stream.send_final = stream.send_offset
             stream.send_terminal_mode = "RESET"
             stream.local_terminal_txid = tx.txid
-            stream.terminal_mode = "RESET"
             stream.stream_error_code = int(fields["stream_error_code"])
             await self.send_tx(tx, reply)
             stream.reset_sent_event.set()
@@ -1664,6 +1685,8 @@ class Gate2Session:
                 "send_offset": stream.send_offset,
                 "send_final": stream.send_final,
                 "terminal_mode": stream.terminal_mode,
+                "recv_terminal_mode": stream.recv_terminal_mode,
+                "send_terminal_mode": stream.send_terminal_mode,
                 "stream_error_code": stream.stream_error_code,
             }
         return {
@@ -2013,6 +2036,15 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
                 "candidate_rejected",
                 error_code=exc.error_code,
                 reason=str(exc),
+            )
+            writer.close()
+            await writer.wait_closed()
+        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError) as exc:
+            session.trace.emit(
+                "candidate_handshake_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+                session_preserved=session.session_id is not None,
             )
             writer.close()
             await writer.wait_closed()

@@ -929,6 +929,8 @@ class IndependentSession:
                 raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
+            if stream.send_final is not None and consumed > stream.send_final:
+                raise FinalSizeError("STREAM_CREDIT Consumed Offset exceeds local Final Offset")
             result = stream.peer_credit.accept(
                 consumed, maximum, STREAM_CREDIT_WINDOW_LIMIT, "Stream"
             )
@@ -1181,6 +1183,36 @@ class IndependentSession:
             if data[left - new_start : right - new_start] != accepted[left - accepted_start : right - accepted_start]:
                 raise ProtocolError("overlapping DATA changed Stream byte identity")
 
+    def store_chunk(self, stream: StreamState, offset: int, data: bytes) -> None:
+        prior = stream.accepted_chunks.get(offset)
+        if prior is None or len(data) > len(prior):
+            stream.accepted_chunks[offset] = data
+        queued = stream.recv_segments.get(offset)
+        if queued is None or len(data) > len(queued):
+            stream.recv_segments[offset] = data
+
+    def flush_contiguous_chunks(self, stream: StreamState) -> None:
+        cursor = stream.recv_next
+        while True:
+            covering = [
+                (start, chunk)
+                for start, chunk in stream.accepted_chunks.items()
+                if start <= cursor < start + len(chunk)
+            ]
+            if not covering:
+                break
+            start, chunk = max(covering, key=lambda item: item[0] + len(item[1]))
+            suffix = chunk[cursor - start :]
+            if not suffix:
+                break
+            stream.recv_data.extend(suffix)
+            cursor += len(suffix)
+            self.application_rx_bytes += len(suffix)
+        stream.recv_next = cursor
+        for start, chunk in list(stream.recv_segments.items()):
+            if start + len(chunk) <= cursor:
+                stream.recv_segments.pop(start, None)
+
     async def handle_stream_data(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         offset = int(fields["offset"])
@@ -1215,7 +1247,7 @@ class IndependentSession:
             self.application_duplicate_bytes_suppressed += len(data)
         else:
             self.ensure_byte_identity(stream, offset, data)
-            stream.accepted_chunks[offset] = data
+            self.store_chunk(stream, offset, data)
             committed_before = stream.recv_committed
             committed_after = max(committed_before, end)
             added_commitment = committed_after - committed_before
@@ -1224,7 +1256,7 @@ class IndependentSession:
             self.session_recv_committed += added_commitment
             stream.recv_committed = committed_after
 
-            if stream.terminal_mode == "RESET":
+            if stream.recv_terminal_mode == "RESET":
                 self.application_duplicate_bytes_suppressed += len(data)
                 self.trace.emit(
                     "application_delivery_suppressed",
@@ -1235,17 +1267,7 @@ class IndependentSession:
                     data_length=len(data),
                 )
             else:
-                previous = stream.recv_segments.get(offset)
-                if previous is not None and previous != data:
-                    raise TransmissionError("conflicting Stream bytes")
-                stream.recv_segments[offset] = data
-                cursor = stream.recv_next
-                while cursor in stream.recv_segments:
-                    chunk = stream.recv_segments.pop(cursor)
-                    stream.recv_data.extend(chunk)
-                    cursor += len(chunk)
-                    self.application_rx_bytes += len(chunk)
-                stream.recv_next = cursor
+                self.flush_contiguous_chunks(stream)
 
         self.remember_ack(stream_id, txid)
         if self.should_suppress_confirmation(FRAME_STREAM_DATA, fields, incoming):
@@ -1280,10 +1302,8 @@ class IndependentSession:
             stream.recv_committed = max(stream.recv_committed, final_offset)
         if stream.recv_final is None:
             stream.recv_final = final_offset
-        if terminal_kind == "RESET":
-            stream.terminal_mode = "RESET"
-        elif not duplicate and stream.terminal_mode != "RESET":
-            stream.terminal_mode = "FIN"
+        # Directional terminal state is applied by the caller. This helper only
+        # validates and commits the peer-declared final size.
 
     async def handle_stream_fin(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
@@ -1307,7 +1327,9 @@ class IndependentSession:
             stream.accepted = True
         duplicate = self.register_peer_tx(FRAME_STREAM_FIN, fields)
         self.apply_terminal_receive(stream, final_offset, duplicate, "FIN")
-        stream.recv_terminal_mode = "FIN"
+        if stream.recv_terminal_mode != "RESET":
+            stream.recv_terminal_mode = "FIN"
+            stream.terminal_mode = "FIN"
 
         self.remember_ack(stream_id, txid)
         suppress = self.should_suppress_confirmation(FRAME_STREAM_FIN, fields, incoming)
@@ -1377,6 +1399,7 @@ class IndependentSession:
         duplicate = self.register_peer_tx(FRAME_RESET_STREAM, fields)
         self.apply_terminal_receive(stream, final_offset, duplicate, "RESET")
         stream.recv_terminal_mode = "RESET"
+        stream.terminal_mode = "RESET"
         stream.stream_error_code = int(fields["stream_error_code"])
         self.remember_ack(stream_id, txid)
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
@@ -1417,7 +1440,7 @@ class IndependentSession:
             receiver_timestamp_us=reply.timestamp_us(),
         )
         stream.stop_received_event.set()
-        if not duplicate and stream.terminal_mode != "RESET":
+        if not duplicate and stream.send_terminal_mode != "RESET":
             tx = self.alloc_tx(
                 FRAME_RESET_STREAM,
                 stream_id,
@@ -1427,7 +1450,6 @@ class IndependentSession:
             stream.send_final = stream.send_offset
             stream.send_terminal_mode = "RESET"
             stream.local_terminal_txid = tx.txid
-            stream.terminal_mode = "RESET"
             stream.stream_error_code = int(fields["stream_error_code"])
             await self.send_tx(tx, reply)
             stream.reset_sent_event.set()
@@ -1592,6 +1614,8 @@ class IndependentSession:
                 "send_offset": stream.send_offset,
                 "send_final": stream.send_final,
                 "terminal_mode": stream.terminal_mode,
+                "recv_terminal_mode": stream.recv_terminal_mode,
+                "send_terminal_mode": stream.send_terminal_mode,
                 "stream_error_code": stream.stream_error_code,
             }
         return {
@@ -1920,6 +1944,15 @@ async def server_main(session: IndependentSession, args: argparse.Namespace, key
                 "candidate_rejected",
                 error_code=exc.error_code,
                 reason=str(exc),
+            )
+            writer.close()
+            await writer.wait_closed()
+        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError) as exc:
+            session.trace.emit(
+                "candidate_handshake_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+                session_preserved=session.session_id is not None,
             )
             writer.close()
             await writer.wait_closed()

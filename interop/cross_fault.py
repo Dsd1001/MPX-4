@@ -82,7 +82,9 @@ def verify(scenario: str, client: dict, server: dict, ct: List[dict], st: List[d
         return ["SERVER_FINISHED-loss ambiguity","retry above Highest Attempted","fresh-ID Gen0 first-use recovery"]
     if scenario == "fin-reset-retire":
         cs = client["streams"]["1"]; ss = server["streams"]["1"]
-        check(cs["terminal_mode"] == ss["terminal_mode"] == "RESET", "RESET semantics")
+        check(cs["send_terminal_mode"] == "RESET", "client send direction RESET semantics")
+        check(cs["recv_terminal_mode"] != "RESET", "client receive direction incorrectly RESET")
+        check(ss["recv_terminal_mode"] == "RESET", "server receive direction RESET semantics")
         check(cs["send_final"] == ss["recv_final"] == 10, "final size")
         check(client["settled_through"] >= 3 and server["peer_retired_through"] >= 3, "retire prefix")
         check(has(ct, "transmission_attempt", frame_type="STREAM_FIN", reinjection=True), "late FIN reinjection")

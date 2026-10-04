@@ -1320,6 +1320,155 @@ async def case_create_collision_server_only(f: Fixture) -> dict:
     return {"retained": True}
 
 
+async def case_stop_sending_directionality(f: Fixture) -> dict:
+    p = await f.establish()
+    stream = await f.open_stream(p)
+    cid = p.carrier.carrier_id
+    stop_tx = f.next_peer_tx(cid)
+    await p.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=stop_tx,
+        stream_error_code=7,
+    )
+    stop_ack = await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(stop_ack["transmission_id"]) == stop_tx, stop_ack)
+    reset = await p.recv_until(f.core.FRAME_RESET_STREAM)
+    reset_tx = int(reset["transmission_id"])
+    check(int(reset["final_offset"]) == int(stream.send_offset), reset)
+    await p.carrier.send_frame(
+        f.core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=reset_tx,
+        receiver_timestamp_us=0,
+    )
+    data_tx = f.next_peer_tx(cid)
+    await p.carrier.send_frame(
+        f.core.FRAME_STREAM_DATA,
+        stream_id=1,
+        offset=0,
+        transmission_id=data_tx,
+        data=b"X",
+    )
+    data_ack = await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(data_ack["transmission_id"]) == data_tx, data_ack)
+    check(bytes(stream.recv_data) == b"X", "STOP_SENDING incorrectly terminated receive direction")
+    check(stream.recv_terminal_mode == "ACTIVE", stream.recv_terminal_mode)
+    check(stream.send_terminal_mode == "RESET", stream.send_terminal_mode)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"recv": stream.recv_terminal_mode, "send": stream.send_terminal_mode, "application": "X"}
+
+
+async def case_legal_overlap_reassembly(f: Fixture) -> dict:
+    p = await f.establish()
+    stream = await f.open_stream(p)
+    cid = p.carrier.carrier_id
+    for offset, data in ((1, b"BC"), (0, b"AB")):
+        tx = f.next_peer_tx(cid)
+        await p.carrier.send_frame(
+            f.core.FRAME_STREAM_DATA,
+            stream_id=1,
+            offset=offset,
+            transmission_id=tx,
+            data=data,
+        )
+        ack = await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+        check(int(ack["transmission_id"]) == tx, ack)
+    check(bytes(stream.recv_data) == b"ABC", stream.recv_data)
+    check(stream.recv_next == 3, stream.recv_next)
+    check(f.session.application_rx_bytes == 3, f.session.application_rx_bytes)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"application": "ABC", "recv_next": 3}
+
+
+async def case_same_offset_extension(f: Fixture) -> dict:
+    p = await f.establish()
+    stream = await f.open_stream(p)
+    cid = p.carrier.carrier_id
+    for offset, data in ((1, b"B"), (1, b"BC"), (0, b"A")):
+        tx = f.next_peer_tx(cid)
+        await p.carrier.send_frame(
+            f.core.FRAME_STREAM_DATA,
+            stream_id=1,
+            offset=offset,
+            transmission_id=tx,
+            data=data,
+        )
+        ack = await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+        check(int(ack["transmission_id"]) == tx, ack)
+    check(bytes(stream.recv_data) == b"ABC", stream.recv_data)
+    check(stream.recv_next == 3, stream.recv_next)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"application": "ABC", "recv_next": 3}
+
+
+async def case_terminal_credit_boundary(f: Fixture) -> dict:
+    p = await f.establish()
+    stream = await f.open_stream(p)
+    cid = p.carrier.carrier_id
+    stop_tx = f.next_peer_tx(cid)
+    await p.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=stop_tx,
+        stream_error_code=0,
+    )
+    await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    reset = await p.recv_until(f.core.FRAME_RESET_STREAM)
+    await p.carrier.send_frame(
+        f.core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=int(reset["transmission_id"]),
+        receiver_timestamp_us=0,
+    )
+    old = f.stream_credit(1)
+    await p.carrier.send_frame(
+        f.core.FRAME_STREAM_CREDIT,
+        stream_id=1,
+        consumed_offset=0,
+        maximum_offset=max(old[1] + 8, 8),
+    )
+    await f.ping(p, 0xC107)
+    check(stream.send_final == 0, stream.send_final)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"send_final": stream.send_final, "credit": list(f.stream_credit(1))}
+
+
+async def case_terminal_credit_beyond_final(f: Fixture) -> dict:
+    p = await f.establish()
+    stream = await f.open_stream(p)
+    cid = p.carrier.carrier_id
+    stop_tx = f.next_peer_tx(cid)
+    await p.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=stop_tx,
+        stream_error_code=0,
+    )
+    await p.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    reset = await p.recv_until(f.core.FRAME_RESET_STREAM)
+    await p.carrier.send_frame(
+        f.core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=int(reset["transmission_id"]),
+        receiver_timestamp_us=0,
+    )
+    old = f.stream_credit(1)
+    await p.carrier.send_frame(
+        f.core.FRAME_STREAM_CREDIT,
+        stream_id=1,
+        consumed_offset=1,
+        maximum_offset=max(old[1] + 8, 8),
+    )
+    close = await f.expect_session_close(
+        p,
+        ERROR_FINAL_SIZE,
+        f.core.FRAME_STREAM_CREDIT,
+    )
+    check(stream.send_final == 0, stream.send_final)
+    return {"send_final": stream.send_final, "close": close}
+
+
 CASES = {
     "normal-data": case_normal_data,
     "fin-fill-hole": case_fin_fill_hole,
@@ -1347,6 +1496,11 @@ CASES = {
     "invalid-stream-parity": case_invalid_stream_parity_server_only,
     "candidate-conflict": case_candidate_conflict_server_only,
     "create-collision": case_create_collision_server_only,
+    "stop-sending-directionality": case_stop_sending_directionality,
+    "legal-overlap-reassembly": case_legal_overlap_reassembly,
+    "same-offset-extension": case_same_offset_extension,
+    "terminal-credit-boundary": case_terminal_credit_boundary,
+    "terminal-credit-beyond-final": case_terminal_credit_beyond_final,
 }
 
 
