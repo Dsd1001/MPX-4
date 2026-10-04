@@ -112,7 +112,7 @@ Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
 ## Repository validation
 
-The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, Secure Record protocol legality plus AEAD consistency, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, and mutation checks that also run under Python optimization.
+The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, wire-derived handshake limits, direction-bound Secure Record keys/IVs, Core Frame body legality, close-last ordering, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, and mutation checks that also run under Python optimization.
 
 Validation tooling supports Python 3.11 and 3.12 and requires `cryptography>=42,<47`. GitHub Actions runs the full suite on both Python versions. `tools/validate.py` uses exit status 2 for conformance/vector validation failures; unexpected runtime or tooling failures use a different non-zero exit. `tools/mutation_test.py` first requires an unchanged baseline PASS in ordinary and optimized mode and accepts only the explicit validation-failure status for a mutation.
 

@@ -18,20 +18,38 @@
       "expected": [
         "eventual_STREAM_CREDIT",
         "eventual_SESSION_CREDIT"
-      ]
+      ],
+      "session_state": "ACTIVE_after_DORMANT"
     },
     {
       "name": "retire-refresh-after-recovery",
       "retired_through": 27,
       "can_release_peer_state": true,
       "authenticated_writable_carrier": true,
-      "expected": "eventual_TRANSMISSION_RETIRE_refresh"
+      "expected": "eventual_TRANSMISSION_RETIRE_refresh",
+      "session_state": "ACTIVE_after_DORMANT"
     },
     {
       "name": "no-writable-carrier",
       "session_state": "DORMANT",
       "authenticated_writable_carrier": false,
       "expected": "refresh_deferred"
+    },
+    {
+      "name": "stream-probe-after-session-closed",
+      "session_state": "CLOSED",
+      "stream_state": "retained",
+      "probe_stream_id": 7,
+      "authenticated_writable_carrier": false,
+      "expected": "no_refresh_required"
+    },
+    {
+      "name": "retire-after-session-closed",
+      "session_state": "CLOSED",
+      "retired_through": 27,
+      "can_release_peer_state": true,
+      "authenticated_writable_carrier": false,
+      "expected": "no_refresh_required"
     }
   ]
 }

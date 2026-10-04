@@ -273,18 +273,92 @@ def parse_msg(h):
     b = bytes.fromhex(h)
     typ, i = vi_dec(b)
     ln, i = vi_dec(b, i)
+    check(ln <= 4096, ('handshake message too large', ln))
     check(i + ln == len(b), 'validation check failed')
     ps = []
     end = i + ln
+    previous_type = -1
     while i < end:
         pt, i = vi_dec(b, i)
+        check(pt > previous_type, ('duplicate or out-of-order handshake Parameter', pt, previous_type))
+        previous_type = pt
+        check(i < end, ('missing Parameter Flags', pt))
         flags = b[i]
         i += 1
+        check(flags & 0xfe == 0, ('reserved Parameter Flags set', pt, flags))
         plen, i = vi_dec(b, i)
+        check(i + plen <= end, ('truncated Parameter value', pt, plen, end - i))
         val = b[i:i + plen]
         i += plen
         ps.append((pt, flags, val))
+    check(i == end, 'handshake Parameter parse did not end on Message boundary')
     return (typ, ps, b)
+
+def _param_map(params):
+    return {t: (flags, value) for t, flags, value in params}
+
+
+def _decode_param_varint(params, parameter_type, name, minimum=0, maximum=MAX_VARINT):
+    check(parameter_type in params, ('missing handshake Parameter', name))
+    flags, raw = params[parameter_type]
+    value, end = vi_dec(raw)
+    check(end == len(raw), ('extra bytes in handshake VarInt Parameter', name))
+    check(minimum <= value <= maximum, ('handshake Parameter out of range', name, value, minimum, maximum))
+    return value
+
+
+def _handshake_context(cp, sp, decoded):
+    client=_param_map(cp)
+    server=_param_map(sp)
+
+    check(list(client) == [1,2,3,4,5,7,8,9,10], ('CLIENT_INIT Core Parameter set/order', list(client)))
+    check(list(server) == [6,7,8,9,10], ('SERVER_INIT Core Parameter set/order', list(server)))
+    check(client[10][0] == 1 and server[10][0] == 1, 'MAX_CARRIERS must set CRITICAL=1')
+
+    session_id=client[1][1]
+    check(len(session_id)==16 and session_id != b'\x00'*16, 'invalid SESSION_ID')
+    action=_decode_param_varint(client,2,'SESSION_ACTION',0,1)
+    carrier_id=_decode_param_varint(client,3,'CARRIER_ID',1,MAX_VARINT)
+    generation=_decode_param_varint(client,4,'CARRIER_GENERATION',0,MAX_VARINT)
+    client_nonce=client[5][1]
+    server_nonce=server[6][1]
+    check(len(client_nonce)==32 and len(server_nonce)==32, 'invalid handshake nonce length')
+
+    client_limits={
+        'max_frame_payload': _decode_param_varint(client,7,'client MAX_FRAME_PAYLOAD',1,32768),
+        'max_record_size': _decode_param_varint(client,8,'client MAX_RECORD_SIZE',1024,65536),
+        'max_streams': _decode_param_varint(client,9,'client MAX_STREAMS',1,2048),
+    }
+    server_limits={
+        'max_frame_payload': _decode_param_varint(server,7,'server MAX_FRAME_PAYLOAD',1,32768),
+        'max_record_size': _decode_param_varint(server,8,'server MAX_RECORD_SIZE',1024,65536),
+        'max_streams': _decode_param_varint(server,9,'server MAX_STREAMS',1,2048),
+    }
+    client_max_carriers=_decode_param_varint(client,10,'client MAX_CARRIERS',1,MAX_VARINT)
+    server_max_carriers=_decode_param_varint(server,10,'server MAX_CARRIERS',1,MAX_VARINT)
+
+    expected={
+        'session_id_hex':session_id.hex(),
+        'session_action':'CREATE' if action==0 else 'JOIN',
+        'carrier_id':str(carrier_id),
+        'carrier_generation':str(generation),
+        'client_nonce_hex':client_nonce.hex(),
+        'server_nonce_hex':server_nonce.hex(),
+        'client_receive_limits':{k:str(v) for k,v in client_limits.items()},
+        'server_receive_limits':{k:str(v) for k,v in server_limits.items()},
+        'client_max_carriers':str(client_max_carriers),
+        'server_max_carriers':str(server_max_carriers),
+        'effective_carrier_limit':str(min(client_max_carriers,server_max_carriers)),
+    }
+    check(decoded == expected, ('decoded_handshake metadata differs from authoritative wire', decoded, expected))
+
+    return {
+        'client_receive_limits':client_limits,
+        'server_receive_limits':server_limits,
+        'client_max_carriers':client_max_carriers,
+        'server_max_carriers':server_max_carriers,
+    }
+
 
 def validate_record_plaintext(pt, registry):
     check(len(pt) >= 1, 'Secure Record plaintext must be non-empty')
@@ -294,16 +368,24 @@ def validate_record_plaintext(pt, registry):
         frame_type, pos = vi_dec(pt, pos)
         frame_length, pos = vi_dec(pt, pos)
         check(pos + frame_length <= len(pt), ('truncated Frame in Secure Record', frame_type, frame_length, len(pt) - pos))
+        body=pt[pos:pos+frame_length]
+        frame_end=pos+frame_length
         if frame_type <= 0x3f:
             check(frame_type in reverse, ('unknown Core Frame in Secure Record', frame_type))
+            name=reverse[frame_type]
+            decode_body(name,body)
+            if name in {'CARRIER_CLOSE','SESSION_CLOSE'}:
+                check(frame_end == len(pt), (name,'must be final Frame in Secure Record'))
         elif frame_type <= 0x3fff:
+            # Extension Frames are safely skipped by their authenticated length.
             pass
         elif frame_type <= 0x7fff:
             raise ValidationError(f'Private Use Frame requires negotiated profile: {frame_type}')
         else:
             raise ValidationError(f'reserved Frame Type in Draft 11: {frame_type}')
-        pos += frame_length
+        pos = frame_end
     check(pos == len(pt), 'Secure Record plaintext did not end on a Frame boundary')
+
 
 def handshake_crypto_records(root):
     tv = root / 'test-vectors'
@@ -312,9 +394,7 @@ def handshake_crypto_records(root):
     ct, cp, ci = parse_msg(ks['inputs']['client_init_hex'])
     st, sp, si = parse_msg(ks['inputs']['server_init_hex'])
     check(ct == 1 and st == 2, 'validation check failed')
-    check([x[0] for x in cp] == [1, 2, 3, 4, 5, 7, 8, 9, 10], 'validation check failed')
-    check([x[0] for x in sp] == [6, 7, 8, 9, 10], 'validation check failed')
-    check(dict(((t, (f, v)) for t, f, v in cp))[10][0] == 1 and dict(((t, (f, v)) for t, f, v in sp))[10][0] == 1, 'validation check failed')
+    context=_handshake_context(cp,sp,ks['decoded_handshake'])
 
     def extract(salt, ikm):
         return hmac.new(salt, ikm, hashlib.sha256).digest()
@@ -332,6 +412,7 @@ def handshake_crypto_records(root):
     def label(secret, name, ctx, L):
         lb = b'mpx4 ' + name.encode()
         return expand(secret, L.to_bytes(2, 'big') + bytes([len(lb)]) + lb + bytes([len(ctx)]) + ctx, L)
+
     pre = bytes.fromhex(ks['inputs']['connection_preface_hex'])
     tk = bytes.fromhex(ks['inputs']['transport_key_hex'])
     h0 = hashlib.sha256(pre + ci + si).digest()
@@ -351,18 +432,42 @@ def handshake_crypto_records(root):
     civ = label(cas, 'iv', b'', 12)
     sk = label(sas, 'key', b'', 32)
     siv = label(sas, 'iv', b'', 12)
-    checks = {'h0_hex': h0, 'early_secret_hex': early, 'handshake_secret_hex': hs, 'client_finished_key_hex': cfk, 'server_finished_key_hex': sfk, 'client_verify_data_hex': cv, 'client_finished_hex': cf, 'h1_hex': h1, 'server_verify_data_hex': sv, 'server_finished_hex': sf, 'h2_hex': h2, 'client_application_secret_hex': cas, 'server_application_secret_hex': sas, 'client_traffic_key_hex': ck, 'client_traffic_iv_hex': civ, 'server_traffic_key_hex': sk, 'server_traffic_iv_hex': siv}
+    checks = {
+        'h0_hex': h0,
+        'early_secret_hex': early,
+        'handshake_secret_hex': hs,
+        'client_finished_key_hex': cfk,
+        'server_finished_key_hex': sfk,
+        'client_verify_data_hex': cv,
+        'client_finished_hex': cf,
+        'h1_hex': h1,
+        'server_verify_data_hex': sv,
+        'server_finished_hex': sf,
+        'h2_hex': h2,
+        'client_application_secret_hex': cas,
+        'server_application_secret_hex': sas,
+        'client_traffic_key_hex': ck,
+        'client_traffic_iv_hex': civ,
+        'server_traffic_key_hex': sk,
+        'server_traffic_iv_hex': siv,
+    }
     for k, v in checks.items():
         check(ks['derived'][k] == v.hex(), k)
-    check(sr['traffic_key_hex'] == ck.hex() and sr['traffic_iv_hex'] == civ.hex(), 'validation check failed')
+
     direction = sr.get('direction')
     if direction == 'client_to_server':
-        peer_max_record_size = int(ks['decoded_handshake']['server_receive_limits']['max_record_size'])
+        traffic_key,traffic_iv=ck,civ
+        peer_limits=context['server_receive_limits']
     elif direction == 'server_to_client':
-        peer_max_record_size = int(ks['decoded_handshake']['client_receive_limits']['max_record_size'])
+        traffic_key,traffic_iv=sk,siv
+        peer_limits=context['client_receive_limits']
     else:
         raise ValidationError(f'unknown Secure Record direction: {direction!r}')
+
+    check(sr['traffic_key_hex'] == traffic_key.hex() and sr['traffic_iv_hex'] == traffic_iv.hex(), ('Secure Record key/IV do not match direction',direction))
+    peer_max_record_size=peer_limits['max_record_size']
     frame_registry = parse_registry(root)
+
     for rec in sr['records']:
         seq = int(rec['sequence_number'])
         check(0 <= seq < (1 << 24), ('record sequence outside traffic-key lifetime', seq))
@@ -380,19 +485,20 @@ def handshake_crypto_records(root):
         check(rec['aad_hex'] == aad.hex(), 'validation check failed')
         seq96 = b'\x00' * 4 + seq.to_bytes(8, 'big')
         check(rec['seq96_hex'] == seq96.hex(), 'validation check failed')
-        nonce = bytes((a ^ b for a, b in zip(civ, seq96)))
+        nonce = bytes((a ^ b for a, b in zip(traffic_iv, seq96)))
         check(rec['nonce_hex'] == nonce.hex(), 'validation check failed')
-        enc = AESGCM(ck).encrypt(nonce, pt, aad)
-        c, tag = (enc[:-16], enc[-16:])
-        check(rec['ciphertext_hex'] == c.hex() and rec['authentication_tag_hex'] == tag.hex(), 'validation check failed')
-        wire = aad + c + tag
+        enc = AESGCM(traffic_key).encrypt(nonce, pt, aad)
+        ciphertext, tag = (enc[:-16], enc[-16:])
+        check(rec['ciphertext_hex'] == ciphertext.hex() and rec['authentication_tag_hex'] == tag.hex(), 'validation check failed')
+        wire = aad + ciphertext + tag
         check(rec['wire_record_hex'] == wire.hex(), 'validation check failed')
         wr = bytes.fromhex(rec['wire_record_hex'])
         check(wr[0:1] == flags, 'validation check failed')
         parsed_len, hdr_end = vi_dec(wr, 1)
         check(parsed_len == clen and hdr_end + clen + 16 == len(wr), 'validation check failed')
-        check(AESGCM(ck).decrypt(nonce, wr[hdr_end:hdr_end + clen] + wr[-16:], wr[:hdr_end]) == pt, 'validation check failed')
+        check(AESGCM(traffic_key).decrypt(nonce, wr[hdr_end:hdr_end + clen] + wr[-16:], wr[:hdr_end]) == pt, 'validation check failed')
     print(f"handshake/key-schedule/secure-record: ok ({len(sr['records'])} complete records)")
+
 
 def credit_merge(retained, received, max_window):
     c, m = retained
@@ -562,11 +668,6 @@ def validate_semantic_oracles(root):
         else:
             outcome = 'TRANSMISSION_ID_ERROR'
         check(c['expected'] == outcome, c)
-    sv = json.loads((tv / 'state-validity.json').read_text())
-    by = {c['name']: c for c in sv['cases']}
-    for name in ('data-beyond-fin', 'conflicting-terminal-size', 'stream-consumed-wrong-final', 'tombstone-data-beyond-final'):
-        c = by[name]
-        check(c['expected'] == 'session_error' and c['error'] == 'FINAL_SIZE_ERROR', c)
     print(f"semantic-oracles: ok ({len(rr['cases'])} review traces, {len(cv['cases'])} confirmation cases)")
 
 def registry(root):

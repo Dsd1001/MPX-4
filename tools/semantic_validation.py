@@ -82,33 +82,45 @@ def validate_max_carriers(root,check,vi_enc):
     return len(d.get('encoding_cases',[]))+len(d['invalid_parameter_cases'])+len(d.get('negotiation_cases',[]))+len(d['active_count_cases'])+len(d.get('carrier_id_cases',[]))
 
 def validate_session_lifecycle(root,check):
-    d=_load(root,'session-lifecycle.json'); count=0
-    for c in _cases(d):
-        n=c['name']
-        if n=='first-carrier-establishes-active':
-            check(c['before']=='CREATING' and c['event']=='first_carrier_established' and c['after']=='ACTIVE' and c['active_carrier_count_after']==1,c)
-        elif n in {'last-carrier-loss-retained','last-carrier-close-retained'}:
-            check(c['before']=='ACTIVE' and c['active_carrier_count_before']==1 and c['retain_session'] is True and c['active_carrier_count_after']==0 and c['after']=='DORMANT',c)
-        elif n=='last-carrier-loss-not-retained':
-            check(c['retain_session'] is False and c['active_carrier_count_after']==0 and c['after']=='CLOSED',c)
-        elif n=='dormant-preserves-state':
-            required={'session_protocol_version','stream_state','stream_and_session_credit','carrier_generation_history','outstanding_transmissions','settled_transmission_identity','tombstones','retired_stream_ids'}
-            check(set(c['expected_preserved'])==required,c)
-        elif n in {'dormant-no-new-stream','dormant-no-new-data-commit'}:
+    cases=_cases(_load(root,'session-lifecycle.json'))
+    required_preserved={
+        'session_protocol_version','stream_state','stream_and_session_credit',
+        'carrier_generation_history','outstanding_transmissions',
+        'settled_transmission_identity','tombstones','retired_stream_ids'
+    }
+    for c in cases:
+        before=c.get('before')
+        state=c.get('state')
+        event=c.get('event')
+        operation=c.get('operation')
+
+        if before=='CREATING' and event=='first_carrier_established':
+            check(c.get('after')=='ACTIVE' and c.get('active_carrier_count_after')==1,c)
+        elif before=='ACTIVE' and c.get('active_carrier_count_before')==1 and event in {'unexpected_carrier_loss','CARRIER_CLOSE'}:
+            expected_after='DORMANT' if c.get('retain_session') is True else 'CLOSED'
+            check(c.get('active_carrier_count_after')==0 and c.get('after')==expected_after,c)
+        elif state=='DORMANT' and 'expected_preserved' in c:
+            check(set(c['expected_preserved'])==required_preserved,c)
+        elif state=='DORMANT' and operation in {'create_stream','create_new_application_data_transmission'}:
             _expect(check,c,'forbidden_until_active')
-        elif n=='dormant-no-attempt': _expect(check,c,'no_eligible_carrier')
-        elif n in {'dormant-join-handshaking','dormant-failed-join'}:
-            check(c['before']=='DORMANT' and c['after']=='DORMANT',c)
-        elif n=='dormant-recovery':
-            check(c['before']=='DORMANT' and c['after']=='ACTIVE' and c['active_carrier_count_after']>=1,c)
-        elif n=='dormant-reinjection-preserves-identity':
-            check(c['expected_transmission_id']==c['outstanding_transmission_id'] and c['additional_logical_credit']==0,c)
-        elif n=='dormant-retention-expiry': check(c['before']=='DORMANT' and c['after']=='CLOSED',c)
-        elif n=='join-after-dormant-discard': _expect(check,c,'SESSION_NOT_FOUND')
-        elif n=='session-close-is-not-dormant': check(c['expected_path']==['CLOSING','CLOSED'],c)
-        else: raise SemanticValidationError(f'unhandled session lifecycle case {n}')
-        count+=1
-    return count
+        elif state=='DORMANT' and operation=='schedule_attempt':
+            check('outstanding_transmission_id' in c,c)
+            _expect(check,c,'no_eligible_carrier')
+        elif before=='DORMANT' and event in {'join_candidate_handshaking','join_candidate_failed'}:
+            check(c.get('after')=='DORMANT',c)
+        elif before=='DORMANT' and event=='join_or_replacement_established':
+            check(c.get('after')=='ACTIVE' and int(c.get('active_carrier_count_after',0))>=1,c)
+        elif before=='DORMANT' and event=='replacement_established_then_reinject':
+            check(c.get('expected_transmission_id')==c.get('outstanding_transmission_id') and c.get('additional_logical_credit')==0,c)
+        elif before=='DORMANT' and event=='local_retention_ends':
+            check(c.get('after')=='CLOSED',c)
+        elif state=='CLOSED' and event=='JOIN_for_discarded_session':
+            _expect(check,c,'SESSION_NOT_FOUND')
+        elif before=='ACTIVE' and event=='SESSION_CLOSE':
+            check(c.get('expected_path')==['CLOSING','CLOSED'],c)
+        else:
+            raise SemanticValidationError(f'unhandled session lifecycle inputs: {c!r}')
+    return len(cases)
 
 def validate_version_compatibility(root,check):
     d=_load(root,'version-compatibility.json'); pv=d['protocol_version']; count=0
@@ -290,6 +302,15 @@ def _parse_pair(value):
     a,b=value[1:-1].split(',',1)
     return int(a.strip()),int(b.strip())
 
+def _opening_decision_identity(cond):
+    tx=cond.get('transmission_id')
+    stream=cond.get('stream_id')
+    if tx=='original STREAM_OPEN' and stream=='matches':
+        return 'match'
+    if tx in {'allocated STREAM_DATA','different from original STREAM_OPEN'} or stream=='different':
+        return 'TRANSMISSION_ID_ERROR'
+    raise SemanticValidationError(f'incomplete opening decision identity: {cond!r}')
+
 def _state_outcome(c):
     state=c.get('state')
     frame=c.get('frame')
@@ -326,13 +347,10 @@ def _state_outcome(c):
                 return 'session_error','TRANSMISSION_ID_ERROR',None
             raise SemanticValidationError(f'unhandled OPENING ACK conditions: {cond!r}')
         if frame in {'STREAM_OPEN_OK','STREAM_OPEN_REJECT'}:
-            tx=cond.get('transmission_id')
-            stream=cond.get('stream_id')
-            if tx=='allocated STREAM_DATA' or stream=='different':
+            identity=_opening_decision_identity(cond)
+            if identity=='TRANSMISSION_ID_ERROR':
                 return 'session_error','TRANSMISSION_ID_ERROR',None
-            if tx=='original STREAM_OPEN' and stream=='matches':
-                return ('apply_acceptance',None,None) if frame=='STREAM_OPEN_OK' else ('apply_rejection',None,None)
-            raise SemanticValidationError(f'unhandled OPENING decision conditions: {cond!r}')
+            return ('apply_acceptance',None,None) if frame=='STREAM_OPEN_OK' else ('apply_rejection',None,None)
         raise SemanticValidationError(f'unhandled OPENING frame: {frame!r}')
 
     if state=='OPENING_CANCEL_PENDING initiator':
@@ -341,6 +359,9 @@ def _state_outcome(c):
         if frame=='STREAM_OPEN_REJECT' and cond.get('error')=='STREAM_STATE_ERROR' and cond.get('matches_cancelled_open') is True:
             return 'cancelled_open_complete_no_session_error',None,None
         if frame=='STREAM_OPEN_OK':
+            identity=_opening_decision_identity(cond)
+            if identity=='TRANSMISSION_ID_ERROR':
+                return 'session_error','TRANSMISSION_ID_ERROR',None
             return 'accepted_then_apply_pending_cancellation',None,None
         raise SemanticValidationError(f'unhandled OPENING_CANCEL_PENDING case: {frame!r} {cond!r}')
 
@@ -445,12 +466,13 @@ def _state_outcome(c):
         raise SemanticValidationError(f'unhandled TOMBSTONE frame: {frame!r}')
 
     if state=='RETIRED_ID':
-        if frame=='STREAM_DATA':
-            if cond.get('transmission_id')=='<= peer_retired_through':
+        tx_relation=cond.get('transmission_id')
+        if frame in {'STREAM_DATA','STREAM_OPEN'}:
+            if tx_relation=='<= peer_retired_through':
                 return 'ignore',None,None
-            raise SemanticValidationError(f'unhandled RETIRED_ID DATA conditions: {cond!r}')
-        if frame=='STREAM_OPEN':
-            return 'ignore',None,None
+            if tx_relation=='> peer_retired_through' and cond.get('confirmation_replay_retained') is True:
+                return 'repeat_confirmation_without_recreating_stream',None,None
+            raise SemanticValidationError(f'retired reliable Frame lacks retirement coverage/replay state: {frame!r} {cond!r}')
         raise SemanticValidationError(f'unhandled RETIRED_ID frame: {frame!r}')
 
     if state=='CLOSING' and frame=='SESSION_CLOSE':
@@ -517,16 +539,24 @@ def _validate_ambiguity_vectors(root,check):
 
 def _validate_recovery_progress(root,check):
     cases=_cases(_load(root,'recovery-progress.json'))
+    active_states={'ACTIVE','ACTIVE_after_DORMANT'}
+    terminal_states={'CLOSING','CLOSED'}
     for c in cases:
+        session_state=c.get('session_state')
+        check(session_state in active_states|terminal_states|{'DORMANT'},(c['name'],'missing/invalid session_state',session_state))
         writable=c.get('authenticated_writable_carrier') is True
-        if not writable:
+
+        if session_state in terminal_states:
+            check(not writable,(c['name'],'terminal Session cannot retain an authenticated writable Carrier'))
+            actual='no_refresh_required'
+        elif not writable:
             actual='refresh_deferred'
         elif 'retained_session_credit' in c:
-            actual='eventual_SESSION_CREDIT_refresh' if c.get('session_state')=='ACTIVE_after_DORMANT' and c.get('retained_session_credit') is True else 'no_refresh_required'
+            actual='eventual_SESSION_CREDIT_refresh' if session_state in active_states and c.get('retained_session_credit') is True else 'no_refresh_required'
         elif 'probe_stream_id' in c:
-            actual=['eventual_STREAM_CREDIT','eventual_SESSION_CREDIT'] if c.get('stream_state')=='retained' and int(c.get('probe_stream_id',0))>0 else 'no_refresh_required'
+            actual=['eventual_STREAM_CREDIT','eventual_SESSION_CREDIT'] if session_state in active_states and c.get('stream_state')=='retained' and int(c.get('probe_stream_id',0))>0 else 'no_refresh_required'
         elif 'retired_through' in c:
-            actual='eventual_TRANSMISSION_RETIRE_refresh' if int(c.get('retired_through',0))>0 and c.get('can_release_peer_state') is True else 'no_refresh_required'
+            actual='eventual_TRANSMISSION_RETIRE_refresh' if session_state in active_states and int(c.get('retired_through',0))>0 and c.get('can_release_peer_state') is True else 'no_refresh_required'
         else:
             raise SemanticValidationError(f'unhandled recovery-progress schema: {c!r}')
         _expect(check,c,actual)

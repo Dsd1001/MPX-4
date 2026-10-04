@@ -38,9 +38,13 @@ Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cr
 ### Validation
 
 - Removes protocol-validator dependence on Python assert so checks remain active under python -O.
-- Follow-up conformance hardening executes all 39 declared Stream/state validity cases from their state, Frame, conditions, expected result, error, and response fields; unknown combinations fail closed.
+- Follow-up conformance hardening executes all 42 declared Stream/state validity cases from their state, Frame, conditions, expected result, error, and response fields; unknown combinations fail closed.
 - Terminal flow-control vectors distinguish previous authenticated End Offset, previous commitment, and established final size, including lower-Final-Offset and duplicate/no-new-commitment cases.
 - Secure Record validation separately enforces protocol legality (`1 <= Ciphertext Length <= peer MAX_RECORD_SIZE`, complete Frame boundaries, valid Core/extension ranges, and sequence number below `2^24`) in addition to AEAD consistency.
+- Secure Record validation now derives directional receive limits from the authenticated CLIENT_INIT/SERVER_INIT wire, cross-checks decoded fixture metadata, selects the direction-matching traffic key/IV, decodes every known Core Frame body, and enforces CARRIER_CLOSE/SESSION_CLOSE as record-final Frames.
+- Opening decisions in OPENING and OPENING_CANCEL_PENDING share the same Stream/Transmission identity validation; recovery progress checks terminal Session state explicitly; retired reliable Frames require retirement coverage or retained confirmation replay state.
+- Legacy case-name-only state assertions were removed so the input-driven state evaluator is the single authority for state-validity cases.
+- Mutation coverage includes paired legal/illegal Record controls, directional key context, handshake-limit metadata tampering, cancellation identity, closed-Session recovery, retired replay coverage, and lifecycle-input flips.
 - Mutation tests require ordinary and optimized baseline PASS before corrupting inputs and count only explicit conformance-validation failures as successful rejection; runtime/tool failures no longer create false green results.
 - Validation CI covers Python 3.11 and 3.12 without changing the Draft 11 wire format.
 - Validates Secure Record Flags=0 and credit structural validity before stale/newer merge.

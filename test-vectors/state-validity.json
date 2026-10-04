@@ -216,7 +216,10 @@
       "state": "RETIRED_ID",
       "frame": "STREAM_OPEN",
       "expected": "ignore",
-      "notes": "Must not recreate Stream state."
+      "notes": "Must not recreate Stream state; silent ignore is valid only because peer retirement covers the reliable STREAM_OPEN.",
+      "conditions": {
+        "transmission_id": "<= peer_retired_through"
+      }
     },
     {
       "name": "duplicate-session-close",
@@ -268,7 +271,11 @@
       "name": "opening-cancel-acceptance-wins",
       "state": "OPENING_CANCEL_PENDING initiator",
       "frame": "STREAM_OPEN_OK",
-      "expected": "accepted_then_apply_pending_cancellation"
+      "expected": "accepted_then_apply_pending_cancellation",
+      "conditions": {
+        "transmission_id": "original STREAM_OPEN",
+        "stream_id": "matches"
+      }
     },
     {
       "name": "stream-credit-stale-reordered",
@@ -374,6 +381,39 @@
       },
       "expected": "acknowledge_without_changing_reset_semantics",
       "response": "TRANSMISSION_ACK"
+    },
+    {
+      "name": "opening-cancel-open-ok-wrong-frame-transmission",
+      "state": "OPENING_CANCEL_PENDING initiator",
+      "frame": "STREAM_OPEN_OK",
+      "conditions": {
+        "transmission_id": "allocated STREAM_DATA",
+        "stream_id": "matches"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "opening-cancel-open-ok-wrong-stream",
+      "state": "OPENING_CANCEL_PENDING initiator",
+      "frame": "STREAM_OPEN_OK",
+      "conditions": {
+        "transmission_id": "original STREAM_OPEN",
+        "stream_id": "different"
+      },
+      "expected": "session_error",
+      "error": "TRANSMISSION_ID_ERROR"
+    },
+    {
+      "name": "retired-open-replay-before-retire",
+      "state": "RETIRED_ID",
+      "frame": "STREAM_OPEN",
+      "conditions": {
+        "transmission_id": "> peer_retired_through",
+        "confirmation_replay_retained": true
+      },
+      "expected": "repeat_confirmation_without_recreating_stream",
+      "notes": "Before retirement covers the original STREAM_OPEN, compact state must retain/recover the opening decision without recreating application Stream state."
     }
   ]
 }
