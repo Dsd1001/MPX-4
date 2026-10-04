@@ -610,6 +610,14 @@ A published interoperability report SHOULD contain:
 
 Optional groups are reported separately.
 
+### 18.1. Repository executable evidence (non-normative)
+
+The repository's executable Gate 3 runner maps the Mandatory profile above to 121 explicit case IDs and requires all A–L groups to pass. Gate 4 adds a second source-isolated implementation and a neutral process harness. The aggregate Gate 4 result requires both implementations to pass all 121 Mandatory cases and requires real-TCP A→B and B→A role reversal for the baseline full-duplex profile and the deterministic multi-Carrier/fault scenarios, both direct and under endpoint write fragmentation.
+
+The repository's second implementation is source/module isolated from the reference implementation and validator at runtime, but both implementations are maintained in the same repository and test project. This evidence therefore supports the Core interoperability claim defined by this document without asserting separate organizational or third-party development.
+
+These executable gates are evidence for Draft 11 interoperability only. They do not replace the separate requirements for a Protocol Version Stability Declaration.
+
 ## 19. Compatibility
 
 Draft 11 keeps development Protocol Version 4 and preserves the Draft 10 wire format, registry assignments, successful CREATE/JOIN handshake transcript, key schedule, Secure Record syntax, and baseline encrypted records.

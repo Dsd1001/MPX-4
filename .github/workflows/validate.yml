@@ -36,5 +36,11 @@ jobs:
         run: python reference/gate2_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate2"
       - name: Reference Gate 2 fragmented-write fault and recovery integration
         run: python reference/gate2_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate2-fragmented" --write-chunk 257
+      - name: Reference Gate 3 complete Mandatory profile
+        run: python -m reference.gate3_harness --out-dir "$RUNNER_TEMP/mpx4-gate3"
+      - name: Independent implementation canonical self-test
+        run: python -m independent.selftest
+      - name: Gate 4 source-isolated A/B interoperability
+        run: python -m interop.gate4_harness --out-dir "$RUNNER_TEMP/mpx4-gate4"
       - name: Ensure generated files are committed
         run: git diff --exit-code

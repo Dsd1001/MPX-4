@@ -6,7 +6,7 @@ It is **not** a production proxy, Relay, scheduler implementation, performance b
 
 ## Current gate
 
-The current implementation includes **Gate 1 reference-to-reference integration** and a **Gate 2 deterministic fault/recovery runtime**.
+The reference implementation now completes **Gate 1**, **Gate 2**, and the full **Gate 3 A–L Mandatory profile**. Gate 4 is driven by the neutral `interop/` harness against the source-isolated peer in `independent/`.
 
 Implemented runtime subset:
 
@@ -37,14 +37,11 @@ Gate 2 adds five real-TCP deterministic scenarios using separate Client and Serv
 
 The same Gate 2 suite is also run with deterministic endpoint TCP write fragmentation (`--write-chunk 257`).
 
-Still not implemented as complete runtime interoperability coverage:
+Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5, B1–B17, C1–C7, D1–D10, E1–E10, F1–F8, G1–G6, H1–H5, I1–I6, J1–J16, K1–K6, and L1–L25. The runner combines real TCP Gate 1/2 evidence, canonical wire/crypto reproduction, and stateful edge execution for exhaustion, tombstones, opening races, candidate admission, credit ordering, and failure scope. A Gate 3 PASS requires every one of the 121 case IDs to be present and PASS.
 
-- the full A-L Mandatory profile, including all D/E/F/G/H/I/J/K/L cases and limits/exhaustion combinations;
-- complete runtime coverage of STREAM_CONSUMED and every cancellation/tombstone/error-scope branch;
-- all candidate rejection/resource-limit combinations and simultaneous-candidate races;
-- an independently implemented peer.
+Gate 4 then runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The neutral harness verifies both implementations at 121/121 Mandatory cases and runs A→B and B→A over real TCP for the basic full-duplex profile and all five deterministic fault scenarios, both directly and with 257-byte endpoint write fragmentation.
 
-Gate 1 and Gate 2 PASS results are reference-to-reference execution evidence only. They are not independent A/B interoperability claims and do not establish Version 4 stability.
+The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. Passing Gates 3 and 4 also does not by itself declare Protocol Version 4 stable.
 
 ## Files
 
@@ -54,6 +51,8 @@ Gate 1 and Gate 2 PASS results are reference-to-reference execution evidence onl
 - `fault_proxy.py` — transport-layer test proxy for byte fragmentation, delay/backpressure, and connection abort.
 - `gate2_runtime.py` — scenario-driven Session-level multi-Carrier/fault runtime with JOIN, Generation replacement, DORMANT state, reinjection, retirement, credit recovery, terminal races, and Core error scope.
 - `gate2_harness.py` — launches Gate 2 Client/Server processes and independently verifies scenario-specific trace/state evidence.
+- `mandatory_model.py` — executable state engine for Mandatory edge cases that require exhaustion, tombstones, opening races, candidate admission, or invalid peer behavior.
+- `gate3_harness.py` — executes and reports every one of the 121 A–L Mandatory case IDs.
 - `selftest.py` — anchors the reference codec/crypto to the repository canonical handshake and Secure Record fixtures.
 
 ## Run
@@ -88,6 +87,14 @@ Run the same Gate 2 scenarios while fragmenting endpoint TCP writes:
       --out-dir /tmp/mpx4-gate2-fragmented \
       --write-chunk 257
 
+Run the complete 121-case Mandatory profile:
+
+    python -m reference.gate3_harness --out-dir /tmp/mpx4-gate3
+
+Run the aggregate two-implementation Gate 4 suite:
+
+    python -m interop.gate4_harness --out-dir /tmp/mpx4-gate4
+
 The Gate 1 output directory contains:
 
 - `gate1-report.json`;
@@ -114,12 +121,12 @@ Protocol-level Gate 2 faults such as delayed confirmation, FIN/RESET races, ambi
 
 The harness reports the repository SHA and whether the working tree was dirty. Test artifacts are runtime evidence and are not committed.
 
-Gate progression remains:
+Current gate status:
 
-- **Gate 0:** codec/crypto/vector baseline and reference self-test;
-- **Gate 1:** reference Client ↔ reference Server over real TCP;
-- **Gate 2:** current deterministic multi-Carrier/fault/recovery scenario suite;
-- **Gate 3:** complete A-L Mandatory profile;
-- **Gate 4:** independent implementation A/B interoperability, with role reversal where supported.
+- **Gate 0: PASS** — codec/crypto/vector baseline and mutation validation;
+- **Gate 1: PASS** — reference Client ↔ reference Server over real TCP, direct and fragmented;
+- **Gate 2: PASS** — deterministic multi-Carrier/fault/recovery scenario suite, direct and fragmented;
+- **Gate 3: PASS** — all 121 A–L Mandatory case IDs;
+- **Gate 4: PASS** — source-isolated A/B interoperability with role reversal for the basic and five fault profiles, direct and fragmented.
 
-Only Gate 4 provides the basis for an independent Core interoperability claim.
+Gate 4 is the repository's basis for a Draft 11 Core interoperability claim under the independence boundary above. Protocol Version 4 remains a development version until a separate Stability Declaration is made.
