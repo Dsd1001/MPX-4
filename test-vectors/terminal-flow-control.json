@@ -6,32 +6,35 @@
     {
       "name": "fin-at-stream-credit",
       "frame": "STREAM_FIN",
-      "old_committed": 8,
       "final_offset": 10,
       "stream_maximum": 10,
       "session_committed_before": 100,
       "session_maximum": 102,
-      "expected": "apply"
+      "expected": "apply",
+      "previous_authenticated_end_offset": 8,
+      "previous_committed_offset": 8
     },
     {
       "name": "fin-beyond-stream-credit",
       "frame": "STREAM_FIN",
-      "old_committed": 8,
       "final_offset": 11,
       "stream_maximum": 10,
       "session_committed_before": 100,
       "session_maximum": 200,
-      "expected": "FLOW_CONTROL_ERROR"
+      "expected": "FLOW_CONTROL_ERROR",
+      "previous_authenticated_end_offset": 8,
+      "previous_committed_offset": 8
     },
     {
       "name": "reset-beyond-session-credit",
       "frame": "RESET_STREAM",
-      "old_committed": 8,
       "final_offset": 10,
       "stream_maximum": 20,
       "session_committed_before": 100,
       "session_maximum": 101,
-      "expected": "FLOW_CONTROL_ERROR"
+      "expected": "FLOW_CONTROL_ERROR",
+      "previous_authenticated_end_offset": 8,
+      "previous_committed_offset": 8
     },
     {
       "name": "conflicting-final-precedes-credit",
@@ -41,7 +44,32 @@
       "stream_maximum": 20,
       "session_committed_before": 100,
       "session_maximum": 200,
+      "expected": "FINAL_SIZE_ERROR",
+      "previous_authenticated_end_offset": 8,
+      "previous_committed_offset": 8
+    },
+    {
+      "name": "fin-below-authenticated-end",
+      "frame": "STREAM_FIN",
+      "previous_authenticated_end_offset": 8,
+      "previous_committed_offset": 8,
+      "final_offset": 7,
+      "stream_maximum": 10,
+      "session_committed_before": 100,
+      "session_maximum": 102,
       "expected": "FINAL_SIZE_ERROR"
+    },
+    {
+      "name": "duplicate-fin-same-final-no-new-commitment",
+      "frame": "STREAM_FIN",
+      "established_final": 10,
+      "previous_authenticated_end_offset": 10,
+      "previous_committed_offset": 10,
+      "final_offset": 10,
+      "stream_maximum": 10,
+      "session_committed_before": 102,
+      "session_maximum": 102,
+      "expected": "apply"
     }
   ]
 }

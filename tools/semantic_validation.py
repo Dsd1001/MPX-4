@@ -4,6 +4,9 @@ from pathlib import Path
 
 MAX_VARINT=(1<<62)-1
 
+class SemanticValidationError(Exception):
+    pass
+
 def _load(root,name):
     return json.loads((Path(root)/'test-vectors'/name).read_text())
 
@@ -11,18 +14,18 @@ def _i(v):
     if isinstance(v,int): return v
     if isinstance(v,str):
         return int(v,16) if v.startswith('0x') else int(v)
-    raise ValueError(v)
+    raise SemanticValidationError(v)
 
 def _cases(d,key='cases'):
     xs=d.get(key)
     if not isinstance(xs,list) or not xs:
-        raise ValueError(f'{key} missing/empty')
+        raise SemanticValidationError(f'{key} missing/empty')
     seen=set()
     for c in xs:
         if not isinstance(c,dict) or not c.get('name'):
-            raise ValueError(f'case missing name: {c!r}')
+            raise SemanticValidationError(f'case missing name: {c!r}')
         if c['name'] in seen:
-            raise ValueError(f'duplicate case name: {c["name"]}')
+            raise SemanticValidationError(f'duplicate case name: {c["name"]}')
         seen.add(c['name'])
     return xs
 
@@ -44,7 +47,7 @@ def validate_max_carriers(root,check,vi_enc):
         elif n=='noncritical': actual='PROTOCOL_VIOLATION' if _i(c.get('flags','0'))&1==0 else 'valid'
         elif n in {'missing-create-client','missing-create-server'}: actual='handshake_reject' if 'CREATE' in c['message'] else 'valid'
         elif n=='changed-on-join': actual='SESSION_CONFLICT' if _i(c['create_client_value'])!=_i(c['join_client_value']) else 'valid'
-        else: raise ValueError(f'unhandled MAX_CARRIERS invalid case {n}')
+        else: raise SemanticValidationError(f'unhandled MAX_CARRIERS invalid case {n}')
         _expect(check,c,actual)
     for c in d.get('negotiation_cases',[]):
         check(_i(c['effective_carrier_limit'])==min(_i(c['client_max_carriers']),_i(c['server_max_carriers'])),c)
@@ -72,7 +75,7 @@ def validate_max_carriers(root,check,vi_enc):
             active=set(c['active_carrier_ids']); hist=set(c['historical_carrier_ids']); cand=c['candidate_carrier_id']
             actual='RESOURCE_LIMIT' if cand in hist and cand not in active and len(active)>=limit else 'accept_replacement'
             _expect(check,c,actual)
-        else: raise ValueError(f'unhandled active-count case {n}')
+        else: raise SemanticValidationError(f'unhandled active-count case {n}')
     for c in d.get('carrier_id_cases',[]):
         v=_i(c['value']); actual='valid' if 1<=v<=MAX_VARINT else 'PROTOCOL_VIOLATION'
         _expect(check,c,actual)
@@ -103,7 +106,7 @@ def validate_session_lifecycle(root,check):
         elif n=='dormant-retention-expiry': check(c['before']=='DORMANT' and c['after']=='CLOSED',c)
         elif n=='join-after-dormant-discard': _expect(check,c,'SESSION_NOT_FOUND')
         elif n=='session-close-is-not-dormant': check(c['expected_path']==['CLOSING','CLOSED'],c)
-        else: raise ValueError(f'unhandled session lifecycle case {n}')
+        else: raise SemanticValidationError(f'unhandled session lifecycle case {n}')
         count+=1
     return count
 
@@ -140,7 +143,7 @@ def validate_version_compatibility(root,check):
             _expect(check,c,'reject_candidate_no_downgrade' if c['client_accepted_server_init'] else 'permitted_then_fresh_connection_retry')
         elif n=='permitted-fallback-not-highest-proof':
             _expect(check,c,'policy_permits_but_no_authenticated_highest_version_proof')
-        else: raise ValueError(f'unhandled version case {n}')
+        else: raise SemanticValidationError(f'unhandled version case {n}')
         count+=1
     return count
 
@@ -163,7 +166,7 @@ def validate_handshake_reject(root,check,vi_enc):
             _expect(check,c,['terminate_candidate','do_not_authenticate_peer','do_not_modify_existing_session','do_not_downgrade_version'])
         elif n=='unknown-extension-error-code': _expect(check,c,['terminate_candidate','diagnostic_reason_unknown','do_not_reply_with_reject'])
         elif n=='successful-transcript-excludes-reject': _expect(check,c,'HANDSHAKE_REJECT_absent_from_H0_H1_H2')
-        else: raise ValueError(f'unhandled handshake reject behavior {n}')
+        else: raise SemanticValidationError(f'unhandled handshake reject behavior {n}')
         count+=1
     return count
 
@@ -181,7 +184,7 @@ def validate_identity_lifecycle(root,check):
             actual='forbidden_reuse_or_wrap' if _i(c['last_allocated'])==MAX_VARINT and _i(c['candidate'])<=_i(c['last_allocated']) else 'valid'
         elif n=='retransmit-final-id': actual='retransmit_or_reinject_same_id_permitted' if _i(c['outstanding_transmission_id'])==_i(c['last_allocated']) else 'invalid'
         elif n=='new-reliable-after-exhaustion': actual='SESSION_CLOSE_RESOURCE_LIMIT_when_possible' if _i(c['last_allocated'])==MAX_VARINT and c['requires_new_reliable_transmission'] else 'valid'
-        else: raise ValueError(n)
+        else: raise SemanticValidationError(n)
         _expect(check,c,actual); count+=1
     for c in d['stream_id_cases']:
         n=c['name']
@@ -190,7 +193,7 @@ def validate_identity_lifecycle(root,check):
         elif n=='final-stream-id': actual='allocate_once_then_stream_namespace_exhausted' if _i(c['candidate'])==MAX_VARINT else 'invalid'
         elif n=='no-stream-wrap': actual='forbidden_reuse_or_wrap' if _i(c['last_allocated'])==MAX_VARINT and _i(c['candidate'])<=MAX_VARINT else 'valid'
         elif n=='open-after-stream-exhaustion': actual='fail_locally_no_new_stream' if _i(c['last_allocated'])==MAX_VARINT and c['local_open_request'] else 'valid'
-        else: raise ValueError(n)
+        else: raise SemanticValidationError(n)
         _expect(check,c,actual); count+=1
     for c in d['session_id_cases']:
         n=c['name']; retained=c.get('retained_state')
@@ -201,7 +204,7 @@ def validate_identity_lifecycle(root,check):
         elif retained=='none':
             actual='normal_CREATE_processing'
         else:
-            raise ValueError(n)
+            raise SemanticValidationError(n)
         _expect(check,c,actual); count+=1
     return count
 
@@ -232,7 +235,7 @@ def validate_carrier_generation(root,check):
         elif n=='later-still-higher-candidate': check(c['expected_highest_accepted_generation']==max(c['candidate_generations']),c)
         elif n=='maximum-generation-no-wrap': _expect(check,c,'no_valid_higher_generation' if _i(c['highest_accepted_generation'])==MAX_VARINT else 'replace')
         elif n=='join-during-session-closing': _expect(check,c,'reject_candidate' if c['session_state']=='CLOSING' else 'accept')
-        else: raise ValueError(f'unhandled generation case {n}')
+        else: raise SemanticValidationError(f'unhandled generation case {n}')
         count+=1
     return count
 
@@ -257,7 +260,7 @@ def validate_error_scope(root,check):
             elif rs=='active_logical_carrier_count': scope,action='pre_establishment_carrier','HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate'
             elif rs=='one_carrier': scope,action='carrier','CARRIER_CLOSE'
             elif rs=='shared_session_state': scope,action='session','SESSION_CLOSE'
-            else: raise ValueError(c)
+            else: raise SemanticValidationError(c)
         elif c.get('error') in {'SESSION_NOT_FOUND','SESSION_CONFLICT','CARRIER_CONFLICT'}:
             scope,action='pre_establishment_carrier','HANDSHAKE_REJECT_if_safely_reportable_then_reject_candidate'
         elif n=='finished-authentication-failure': scope,action='carrier','HANDSHAKE_REJECT_if_safely_reportable_or_terminate_carrier'
@@ -281,44 +284,278 @@ def validate_reordering_edges(root,check):
     _expect(check,c,actual)
     return 2
 
+def _parse_pair(value):
+    if not isinstance(value,str) or not (value.startswith('(') and value.endswith(')')):
+        raise SemanticValidationError(f'invalid pair expression: {value!r}')
+    a,b=value[1:-1].split(',',1)
+    return int(a.strip()),int(b.strip())
+
+def _state_outcome(c):
+    state=c.get('state')
+    frame=c.get('frame')
+    cond=c.get('conditions') or {}
+
+    if state=='UNSEEN responder':
+        if frame=='STREAM_OPEN':
+            return 'apply',None,None
+        if frame=='RESET_STREAM':
+            if cond.get('final_offset')=='0':
+                return 'preopen_cancellation',None,'TRANSMISSION_ACK'
+            return 'session_error','STREAM_STATE_ERROR',None
+        if frame=='STOP_SENDING':
+            return 'preopen_cancellation',None,['TRANSMISSION_ACK','RESET_STREAM(final_offset=0)']
+        return 'session_error','STREAM_STATE_ERROR',None
+
+    if state=='OPEN responder' and frame=='STREAM_OPEN':
+        tx=cond.get('transmission_id')
+        if tx=='same as original':
+            return 'idempotent',None,'repeat STREAM_OPEN_OK'
+        if tx=='different from original':
+            return 'session_error','TRANSMISSION_ID_ERROR',None
+        raise SemanticValidationError(f'unhandled OPEN responder STREAM_OPEN conditions: {cond!r}')
+
+    if state=='OPENING initiator':
+        if frame=='STREAM_CREDIT':
+            return 'acceptance_evidence',None,None
+        if frame=='STREAM_DATA':
+            return 'session_error','STREAM_STATE_ERROR',None
+        if frame=='STREAM_FIN':
+            return ('acceptance_evidence',None,None) if cond.get('final_offset')=='0' else ('session_error','STREAM_STATE_ERROR',None)
+        if frame=='TRANSMISSION_ACK':
+            if cond.get('transmission_id')=='outstanding STREAM_OPEN' and cond.get('stream_id')=='matches':
+                return 'session_error','TRANSMISSION_ID_ERROR',None
+            raise SemanticValidationError(f'unhandled OPENING ACK conditions: {cond!r}')
+        if frame in {'STREAM_OPEN_OK','STREAM_OPEN_REJECT'}:
+            tx=cond.get('transmission_id')
+            stream=cond.get('stream_id')
+            if tx=='allocated STREAM_DATA' or stream=='different':
+                return 'session_error','TRANSMISSION_ID_ERROR',None
+            if tx=='original STREAM_OPEN' and stream=='matches':
+                return ('apply_acceptance',None,None) if frame=='STREAM_OPEN_OK' else ('apply_rejection',None,None)
+            raise SemanticValidationError(f'unhandled OPENING decision conditions: {cond!r}')
+        raise SemanticValidationError(f'unhandled OPENING frame: {frame!r}')
+
+    if state=='OPENING_CANCEL_PENDING initiator':
+        if frame=='RESET_STREAM' and cond.get('final_offset')=='0' and cond.get('matches_outstanding_preopen_stop') is True:
+            return 'cancellation_response_not_acceptance_evidence',None,None
+        if frame=='STREAM_OPEN_REJECT' and cond.get('error')=='STREAM_STATE_ERROR' and cond.get('matches_cancelled_open') is True:
+            return 'cancelled_open_complete_no_session_error',None,None
+        if frame=='STREAM_OPEN_OK':
+            return 'accepted_then_apply_pending_cancellation',None,None
+        raise SemanticValidationError(f'unhandled OPENING_CANCEL_PENDING case: {frame!r} {cond!r}')
+
+    if state=='FIN_RECEIVED':
+        if frame=='STREAM_DATA':
+            relation=cond.get('end_offset')
+            if relation=='> final_offset':
+                return 'session_error','FINAL_SIZE_ERROR',None
+            if relation=='<= final_offset':
+                if cond.get('bytes','consistent')=='consistent':
+                    return 'apply',None,None
+                return 'session_error','PROTOCOL_VIOLATION',None
+            raise SemanticValidationError(f'unhandled FIN_RECEIVED DATA conditions: {cond!r}')
+        if frame=='RESET_STREAM':
+            relation=cond.get('final_offset')
+            if relation=='different from established final_offset':
+                return 'session_error','FINAL_SIZE_ERROR',None
+            if relation=='same as established final_offset':
+                return 'apply_reset_semantics',None,None
+            raise SemanticValidationError(f'unhandled FIN_RECEIVED RESET conditions: {cond!r}')
+        raise SemanticValidationError(f'unhandled FIN_RECEIVED frame: {frame!r}')
+
+    if state=='RESET_RECEIVED':
+        if frame=='STREAM_DATA':
+            relation=cond.get('end_offset')
+            if relation=='<= final_offset':
+                return 'stale_duplicate_no_application_delivery',None,None
+            if relation=='> final_offset':
+                return 'session_error','FINAL_SIZE_ERROR',None
+            raise SemanticValidationError(f'unhandled RESET_RECEIVED DATA conditions: {cond!r}')
+        if frame=='STREAM_FIN':
+            relation=cond.get('final_offset')
+            if relation in {'same','same as established final_offset'}:
+                return 'acknowledge_without_changing_reset_semantics',None,'TRANSMISSION_ACK'
+            if relation in {'different','different from established final_offset'}:
+                return 'session_error','FINAL_SIZE_ERROR',None
+            raise SemanticValidationError(f'unhandled RESET_RECEIVED FIN conditions: {cond!r}')
+        raise SemanticValidationError(f'unhandled RESET_RECEIVED frame: {frame!r}')
+
+    if state=='RECV_ACTIVE':
+        if frame!='STREAM_DATA':
+            raise SemanticValidationError(f'unhandled RECV_ACTIVE frame: {frame!r}')
+        relation=cond.get('end_offset')
+        byte_rule=cond.get('bytes','consistent')
+        if byte_rule!='consistent':
+            return 'session_error','PROTOCOL_VIOLATION',None
+        if relation in {'within retained credit','<= retained credit','<= maximum_offset'}:
+            return 'apply',None,None
+        if relation in {'> retained credit','> maximum_offset'}:
+            return 'session_error','FLOW_CONTROL_ERROR',None
+        raise SemanticValidationError(f'unhandled RECV_ACTIVE DATA conditions: {cond!r}')
+
+    if state=='Session active':
+        if frame=='TRANSMISSION_ACK':
+            tx=cond.get('transmission_id')
+            if tx=='outstanding':
+                return 'settle_transmission',None,None
+            if tx=='previously settled':
+                return 'ignore_duplicate',None,None
+            if tx=='>= next unallocated local Transmission ID':
+                return 'session_error','TRANSMISSION_ID_ERROR',None
+            raise SemanticValidationError(f'unhandled ACK conditions: {cond!r}')
+        if frame=='TRANSMISSION_RETIRE':
+            relation=cond.get('retired_through')
+            if relation=='<= largest_contiguous_peer_tx_processed':
+                return 'advance_peer_retired_through_if_newer',None,None
+            if relation=='> largest_contiguous_peer_tx_processed':
+                return 'session_error','TRANSMISSION_ID_ERROR',None
+            raise SemanticValidationError(f'unhandled retirement conditions: {cond!r}')
+        raise SemanticValidationError(f'unhandled Session active frame: {frame!r}')
+
+    if state=='SEND_CLOSED' and frame=='STREAM_CREDIT':
+        if cond.get('consumed_offset')=='<= local_final_offset':
+            return 'validate_then_ignore',None,None
+        raise SemanticValidationError(f'unhandled SEND_CLOSED credit conditions: {cond!r}')
+
+    if state=='FIN_PENDING' and frame=='STREAM_CONSUMED':
+        relation=cond.get('final_offset')
+        if relation=='different from local final_offset':
+            return 'session_error','FINAL_SIZE_ERROR',None
+        if relation=='same as local final_offset':
+            return 'apply',None,None
+        raise SemanticValidationError(f'unhandled FIN_PENDING consumed conditions: {cond!r}')
+
+    if state=='TOMBSTONE':
+        if frame in {'STREAM_FIN','RESET_STREAM'}:
+            relation=cond.get('final_offset')
+            terminal_match=(cond.get('transmission_id')=='same terminal TxID' or cond.get('matches_recorded_terminal') is True)
+            not_retired=cond.get('transmission_id')!='<= peer_retired_through'
+            if (relation in {'same','same as established final_offset'} or (relation is None and cond.get('matches_recorded_terminal') is True)) and terminal_match and not_retired:
+                return 'idempotent',None,'TRANSMISSION_ACK'
+            if relation in {'different','different from established final_offset'}:
+                return 'session_error','FINAL_SIZE_ERROR',None
+            raise SemanticValidationError(f'unhandled TOMBSTONE terminal conditions: {cond!r}')
+        if frame=='STREAM_DATA':
+            relation=cond.get('end_offset')
+            if relation=='> recorded peer final_offset':
+                return 'session_error','FINAL_SIZE_ERROR',None
+            if relation=='<= recorded peer final_offset':
+                return 'ignore',None,None
+            raise SemanticValidationError(f'unhandled TOMBSTONE DATA conditions: {cond!r}')
+        raise SemanticValidationError(f'unhandled TOMBSTONE frame: {frame!r}')
+
+    if state=='RETIRED_ID':
+        if frame=='STREAM_DATA':
+            if cond.get('transmission_id')=='<= peer_retired_through':
+                return 'ignore',None,None
+            raise SemanticValidationError(f'unhandled RETIRED_ID DATA conditions: {cond!r}')
+        if frame=='STREAM_OPEN':
+            return 'ignore',None,None
+        raise SemanticValidationError(f'unhandled RETIRED_ID frame: {frame!r}')
+
+    if state=='CLOSING' and frame=='SESSION_CLOSE':
+        return 'idempotent',None,None
+
+    if state=='Stream sending' and frame=='STREAM_CREDIT':
+        retained=_parse_pair(cond.get('retained'))
+        received=_parse_pair(cond.get('received'))
+        c0,m0=retained; c1,m1=received
+        if not (0<=c0<=m0<=MAX_VARINT and 0<=c1<=m1<=MAX_VARINT and m0-c0<=16*1024*1024 and m1-c1<=16*1024*1024):
+            return 'session_error','FLOW_CONTROL_ERROR',None
+        if c1>=c0 and m1>=m0:
+            return 'apply_update',None,None
+        if c1<=c0 and m1<=m0:
+            return 'ignore_stale',None,None
+        return 'session_error','FLOW_CONTROL_ERROR',None
+
+    if state=='RESET_PENDING with superseded FIN outstanding' and frame=='local reliability':
+        if cond.get('fin_ack_received') is False and cond.get('eligible_carrier') is True:
+            return 'continue_FIN_retransmit_or_reinject_same_txid',None,None
+        if cond.get('fin_ack_received') is False and cond.get('eligible_carrier') is False:
+            return 'retain_FIN_without_attempt',None,None
+        if cond.get('fin_ack_received') is True:
+            return 'FIN_settled_no_retransmission',None,None
+        raise SemanticValidationError(f'unhandled superseded FIN conditions: {cond!r}')
+
+    raise SemanticValidationError(f'unhandled state-validity case inputs: state={state!r} frame={frame!r} conditions={cond!r}')
+
 def validate_state_edges(root,check):
-    d=_load(root,'state-validity.json'); by={c['name']:c for c in _cases(d)}
-    required={
-      'data-beyond-fin':('STREAM_DATA','session_error','FINAL_SIZE_ERROR'),
-      'conflicting-terminal-size':('RESET_STREAM','session_error','FINAL_SIZE_ERROR'),
-      'stream-consumed-wrong-final':('STREAM_CONSUMED','session_error','FINAL_SIZE_ERROR'),
-      'tombstone-data-beyond-final':('STREAM_DATA','session_error','FINAL_SIZE_ERROR'),
-      'late-data-after-reset':('STREAM_DATA','stale_duplicate_no_application_delivery',None),
-      'transmission-retire-future':('TRANSMISSION_RETIRE','session_error','TRANSMISSION_ID_ERROR'),
-      'fin-superseded-by-reset-remains-reliable':('local reliability','continue_FIN_retransmit_or_reinject_same_txid',None)
-    }
-    for name,(frame,expected,error) in required.items():
-        c=by[name]; check(c.get('frame')==frame,(name,'frame',c.get('frame'),frame)); _expect(check,c,expected)
-        if error: check(c.get('error')==error,(name,'error'))
-    return len(required)
+    cases=_cases(_load(root,'state-validity.json'))
+    for c in cases:
+        actual,error,response=_state_outcome(c)
+        _expect(check,c,actual)
+        if error is None:
+            check('error' not in c,(c['name'],'unexpected error field',c.get('error')))
+        else:
+            check(c.get('error')==error,(c['name'],'error',c.get('error'),error))
+        if response is None:
+            check('response' not in c,(c['name'],'unexpected response field',c.get('response')))
+        else:
+            check(c.get('response')==response,(c['name'],'response',c.get('response'),response))
+    return len(cases)
+
+def _validate_ambiguity_vectors(root,check):
+    cases=_cases(_load(root,'handshake-ambiguity.json'))
+    for c in cases:
+        if {'local_highest_accepted_generation','ambiguous_attempt_generation','next_retry_generation'} <= c.keys():
+            actual='higher_than_accepted_and_ambiguous_attempt' if c.get('server_commit')=='unknown' and c['next_retry_generation']>max(c['local_highest_accepted_generation'],c['ambiguous_attempt_generation']) else 'invalid_retry_generation'
+            _expect(check,c,actual)
+        elif {'carrier_id_state','ambiguous_attempt_generation','expected_recovery','same_id_generation_1'} <= c.keys():
+            expected_recovery='different_unused_carrier_id_generation_0' if c['carrier_id_state']=='UNUSED_locally' and c['ambiguous_attempt_generation']==0 else 'authenticated_acceptance_required'
+            same_id='forbidden_without_authenticated_acceptance' if c['carrier_id_state']=='UNUSED_locally' and c['ambiguous_attempt_generation']==0 else 'depends_on_authenticated_state'
+            check(c['expected_recovery']==expected_recovery,(c['name'],'expected_recovery',c['expected_recovery'],expected_recovery))
+            check(c['same_id_generation_1']==same_id,(c['name'],'same_id_generation_1',c['same_id_generation_1'],same_id))
+        elif {'session_id_retained','recovery_action','authenticated_join_success','unauthenticated_SESSION_NOT_FOUND'} <= c.keys():
+            valid=(c['session_id_retained'] is True and c['recovery_action']=='JOIN_same_session_new_unused_carrier_gen0' and c['authenticated_join_success']=='confirms_session_retained' and c['unauthenticated_SESSION_NOT_FOUND']=='advisory_only')
+            _expect(check,c,'do_not_reuse_reject_as_existence_proof' if valid else 'invalid_ambiguous_create_recovery')
+        elif {'local_policy','old_session_id','new_create_session_id'} <= c.keys():
+            valid=c['local_policy']=='abandon' and c['old_session_id']=='retained_ambiguous' and c['new_create_session_id']=='fresh_random'
+            _expect(check,c,'fresh_session_id_required' if valid else 'invalid_abandon_recovery')
+        else:
+            raise SemanticValidationError(f'unhandled handshake ambiguity schema: {c!r}')
+    return len(cases)
+
+def _validate_recovery_progress(root,check):
+    cases=_cases(_load(root,'recovery-progress.json'))
+    for c in cases:
+        writable=c.get('authenticated_writable_carrier') is True
+        if not writable:
+            actual='refresh_deferred'
+        elif 'retained_session_credit' in c:
+            actual='eventual_SESSION_CREDIT_refresh' if c.get('session_state')=='ACTIVE_after_DORMANT' and c.get('retained_session_credit') is True else 'no_refresh_required'
+        elif 'probe_stream_id' in c:
+            actual=['eventual_STREAM_CREDIT','eventual_SESSION_CREDIT'] if c.get('stream_state')=='retained' and int(c.get('probe_stream_id',0))>0 else 'no_refresh_required'
+        elif 'retired_through' in c:
+            actual='eventual_TRANSMISSION_RETIRE_refresh' if int(c.get('retired_through',0))>0 and c.get('can_release_peer_state') is True else 'no_refresh_required'
+        else:
+            raise SemanticValidationError(f'unhandled recovery-progress schema: {c!r}')
+        _expect(check,c,actual)
+    return len(cases)
+
+def _terminal_flow_outcome(c):
+    if c.get('frame') not in {'STREAM_FIN','RESET_STREAM'}:
+        return 'invalid_terminal_frame'
+    final=int(c['final_offset'])
+    previous_end=int(c['previous_authenticated_end_offset'])
+    previous_committed=int(c['previous_committed_offset'])
+    stream_max=int(c['stream_maximum'])
+    session_before=int(c['session_committed_before'])
+    session_max=int(c['session_maximum'])
+    if not (0<=final<=MAX_VARINT and 0<=previous_end<=MAX_VARINT and 0<=previous_committed<=MAX_VARINT):
+        return 'FINAL_SIZE_ERROR'
+    if 'established_final' in c and final!=int(c['established_final']):
+        return 'FINAL_SIZE_ERROR'
+    if final<previous_end or final<previous_committed:
+        return 'FINAL_SIZE_ERROR'
+    delta=final-previous_committed
+    if final>stream_max or session_before+delta>session_max:
+        return 'FLOW_CONTROL_ERROR'
+    return 'apply'
 
 def validate_new_vectors(root,check):
     count=0
-    for c in _cases(_load(root,'handshake-ambiguity.json')):
-        n=c['name']
-        if n=='replacement-server-finished-lost':
-            actual='higher_than_accepted_and_ambiguous_attempt' if c['next_retry_generation']>max(c['local_highest_accepted_generation'],c['ambiguous_attempt_generation']) else 'invalid_retry_generation'
-            _expect(check,c,actual)
-        elif n=='first-id-server-finished-lost':
-            check(c['ambiguous_attempt_generation']==0 and c['expected_recovery']=='different_unused_carrier_id_generation_0' and c['same_id_generation_1']=='forbidden_without_authenticated_acceptance',c)
-        elif n=='create-server-finished-lost':
-            check(c['authenticated_join_success']=='confirms_session_retained' and c['unauthenticated_SESSION_NOT_FOUND']=='advisory_only',c); _expect(check,c,'do_not_reuse_reject_as_existence_proof')
-        elif n=='abandon-ambiguous-create': _expect(check,c,'fresh_session_id_required' if c['new_create_session_id']=='fresh_random' else 'invalid')
-        else: raise ValueError(n)
-        count+=1
-    for c in _cases(_load(root,'recovery-progress.json')):
-        n=c['name']
-        if not c.get('authenticated_writable_carrier'): actual='refresh_deferred'
-        elif n=='dormant-recovery-session-credit': actual='eventual_SESSION_CREDIT_refresh'
-        elif n=='stream-probe-after-recovery': actual=['eventual_STREAM_CREDIT','eventual_SESSION_CREDIT']
-        elif n=='retire-refresh-after-recovery': actual='eventual_TRANSMISSION_RETIRE_refresh'
-        else: raise ValueError(n)
-        _expect(check,c,actual); count+=1
+    count+=_validate_ambiguity_vectors(root,check)
+    count+=_validate_recovery_progress(root,check)
     for c in _cases(_load(root,'transmission-allocation.json')):
         n=c['name']
         if n=='tentative-reservation-not-allocation': actual='not_allocated' if not c['immutable_reliable_state_committed'] else 'allocated'
@@ -326,14 +563,10 @@ def validate_new_vectors(root,check):
             check(c['expected_allocated']==c['next_protocol_transmission_id'] and c['next_after']==c['expected_allocated']+1,c); count+=1; continue
         elif n=='allocated-cannot-disappear': actual='remains_outstanding_eventual_attempt' if not c['confirmation_received'] and c['session_open'] and c['eligible_carrier'] else 'may_end'
         elif n=='resource-failure-after-allocation': actual='SESSION_CLOSE_RESOURCE_LIMIT_when_possible' if c['cannot_preserve_reliability_state'] else 'remain_outstanding'
-        else: raise ValueError(n)
+        else: raise SemanticValidationError(n)
         _expect(check,c,actual); count+=1
     for c in _cases(_load(root,'terminal-flow-control.json')):
-        if 'established_final' in c and c['final_offset']!=c['established_final']: actual='FINAL_SIZE_ERROR'
-        else:
-            delta=max(0,c['final_offset']-c['old_committed'])
-            actual='FLOW_CONTROL_ERROR' if c['final_offset']>c['stream_maximum'] or c['session_committed_before']+delta>c['session_maximum'] else 'apply'
-        _expect(check,c,actual); count+=1
+        _expect(check,c,_terminal_flow_outcome(c)); count+=1
     for c in _cases(_load(root,'close-ordering.json')):
         n=c['name']
         if 'frames' in c:
@@ -341,7 +574,7 @@ def validate_new_vectors(root,check):
             actual='valid_terminal_record' if idx==len(frames)-1 else 'trailing_frame_must_not_create_state'
         elif c['frame']=='CARRIER_CLOSE' and c['range']=='negotiated_extension': actual='close_carrier_reason_unknown'
         elif c['frame']=='SESSION_CLOSE' and c['range']=='negotiated_extension': actual='close_session_reason_unknown'
-        else: raise ValueError(n)
+        else: raise SemanticValidationError(n)
         _expect(check,c,actual); count+=1
     return count
 

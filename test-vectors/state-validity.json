@@ -241,7 +241,8 @@
       "conditions": {
         "final_offset": "same as established final_offset"
       },
-      "expected": "acknowledge_without_changing_reset_semantics"
+      "expected": "acknowledge_without_changing_reset_semantics",
+      "response": "TRANSMISSION_ACK"
     },
     {
       "name": "opening-cancel-reset-response",

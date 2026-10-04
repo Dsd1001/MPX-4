@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from semantic_validation import validate_extended_vectors
+from semantic_validation import SemanticValidationError, validate_extended_vectors
 MAX_VARINT = (1 << 62) - 1
 JS_SAFE = (1 << 53) - 1
 
@@ -21,7 +21,7 @@ def check(condition, detail='validation check failed'):
 
 def vi_enc(v):
     if not 0 <= v <= MAX_VARINT:
-        raise ValueError(v)
+        raise ValidationError(str(v))
     if v < 1 << 6:
         n, p = (1, 0)
     elif v < 1 << 14:
@@ -34,14 +34,14 @@ def vi_enc(v):
 
 def vi_dec(b, i=0):
     if i >= len(b):
-        raise ValueError('truncated varint')
+        raise ValidationError('truncated varint')
     n = (1, 2, 4, 8)[b[i] >> 6]
     if i + n > len(b):
-        raise ValueError('truncated varint')
+        raise ValidationError('truncated varint')
     raw = int.from_bytes(b[i:i + n], 'big')
     v = raw & (1 << 8 * n - 2) - 1
     if len(vi_enc(v)) != n:
-        raise ValueError('non-canonical varint')
+        raise ValidationError('non-canonical varint')
     return (v, i + n)
 
 def walk_numbers(x, path='$'):
@@ -49,7 +49,7 @@ def walk_numbers(x, path='$'):
         return
     if isinstance(x, int):
         if abs(x) > JS_SAFE:
-            raise AssertionError(f'unsafe JSON integer at {path}: {x}; use decimal string')
+            raise ValidationError(f'unsafe JSON integer at {path}: {x}; use decimal string')
     elif isinstance(x, list):
         for i, v in enumerate(x):
             walk_numbers(v, f'{path}[{i}]')
@@ -122,10 +122,10 @@ def validate_varints(root):
         raw = bytes.fromhex(c['hex'])
         try:
             vi_dec(raw)
-        except ValueError:
+        except ValidationError:
             pass
         else:
-            raise AssertionError(f'invalid VarInt accepted: {c}')
+            raise ValidationError(f'invalid VarInt accepted: {c}')
         bad += 1
     print(f'varint: ok ({good} valid, {bad} invalid)')
 
@@ -164,7 +164,7 @@ def frame_body_from_fields(name, fields):
     if name in {'CARRIER_CLOSE', 'SESSION_CLOSE'}:
         reason = fields.get('reason_utf8', '').encode('utf-8')
         return i('error_code') + i('trigger_frame_type') + vi_enc(len(reason)) + reason
-    raise AssertionError(f'no validator body schema for {name}')
+    raise ValidationError(f'no validator body schema for {name}')
 
 def decode_body(name, body):
     pos = 0
@@ -230,13 +230,13 @@ def decode_body(name, body):
         ln, pos2 = vi_dec(body, pos)
         pos = pos2
         if pos + ln > len(body):
-            raise AssertionError(f'truncated reason in {name}')
+            raise ValidationError(f'truncated reason in {name}')
         out['reason_utf8'] = body[pos:pos + ln].decode('utf-8')
         pos += ln
     else:
-        raise AssertionError(f'no decoder schema for {name}')
+        raise ValidationError(f'no decoder schema for {name}')
     if name not in {'STREAM_DATA', 'PADDING'} and pos != len(body):
-        raise AssertionError(f'extra bytes in {name}')
+        raise ValidationError(f'extra bytes in {name}')
     return out
 
 def validate_frames(root):
@@ -285,6 +285,25 @@ def parse_msg(h):
         i += plen
         ps.append((pt, flags, val))
     return (typ, ps, b)
+
+def validate_record_plaintext(pt, registry):
+    check(len(pt) >= 1, 'Secure Record plaintext must be non-empty')
+    pos = 0
+    reverse = {v: k for k, v in registry.items()}
+    while pos < len(pt):
+        frame_type, pos = vi_dec(pt, pos)
+        frame_length, pos = vi_dec(pt, pos)
+        check(pos + frame_length <= len(pt), ('truncated Frame in Secure Record', frame_type, frame_length, len(pt) - pos))
+        if frame_type <= 0x3f:
+            check(frame_type in reverse, ('unknown Core Frame in Secure Record', frame_type))
+        elif frame_type <= 0x3fff:
+            pass
+        elif frame_type <= 0x7fff:
+            raise ValidationError(f'Private Use Frame requires negotiated profile: {frame_type}')
+        else:
+            raise ValidationError(f'reserved Frame Type in Draft 11: {frame_type}')
+        pos += frame_length
+    check(pos == len(pt), 'Secure Record plaintext did not end on a Frame boundary')
 
 def handshake_crypto_records(root):
     tv = root / 'test-vectors'
@@ -336,14 +355,25 @@ def handshake_crypto_records(root):
     for k, v in checks.items():
         check(ks['derived'][k] == v.hex(), k)
     check(sr['traffic_key_hex'] == ck.hex() and sr['traffic_iv_hex'] == civ.hex(), 'validation check failed')
+    direction = sr.get('direction')
+    if direction == 'client_to_server':
+        peer_max_record_size = int(ks['decoded_handshake']['server_receive_limits']['max_record_size'])
+    elif direction == 'server_to_client':
+        peer_max_record_size = int(ks['decoded_handshake']['client_receive_limits']['max_record_size'])
+    else:
+        raise ValidationError(f'unknown Secure Record direction: {direction!r}')
+    frame_registry = parse_registry(root)
     for rec in sr['records']:
         seq = int(rec['sequence_number'])
+        check(0 <= seq < (1 << 24), ('record sequence outside traffic-key lifetime', seq))
         pt = bytes.fromhex(rec['plaintext_hex'])
         flags = bytes.fromhex(rec['record_flags_hex'])
         check(len(flags) == 1, 'validation check failed')
         check(flags == b'\x00', ('record flags must be zero', rec.get('record_flags_hex')))
         clen = int(rec['ciphertext_length'])
         check(clen == len(pt), 'validation check failed')
+        check(1 <= clen <= peer_max_record_size, ('Ciphertext Length outside peer MAX_RECORD_SIZE', clen, peer_max_record_size))
+        validate_record_plaintext(pt, frame_registry)
         clen_vi = vi_enc(clen)
         check(rec['ciphertext_length_varint_hex'] == clen_vi.hex(), 'validation check failed')
         aad = flags + clen_vi
@@ -362,7 +392,7 @@ def handshake_crypto_records(root):
         parsed_len, hdr_end = vi_dec(wr, 1)
         check(parsed_len == clen and hdr_end + clen + 16 == len(wr), 'validation check failed')
         check(AESGCM(ck).decrypt(nonce, wr[hdr_end:hdr_end + clen] + wr[-16:], wr[:hdr_end]) == pt, 'validation check failed')
-    print(f'handshake/key-schedule/secure-record: ok ({len(sr['records'])} complete records)')
+    print(f"handshake/key-schedule/secure-record: ok ({len(sr['records'])} complete records)")
 
 def credit_merge(retained, received, max_window):
     c, m = retained
@@ -382,7 +412,7 @@ def required_confirmation(frame_type):
         return 'OPEN_DECISION'
     if frame_type in {'STREAM_DATA', 'STREAM_FIN', 'RESET_STREAM', 'STOP_SENDING', 'STREAM_CONSUMED'}:
         return 'TRANSMISSION_ACK'
-    raise ValueError(frame_type)
+    raise ValidationError(str(frame_type))
 
 def contiguous_prefix(values):
     n = 0
@@ -417,7 +447,7 @@ def simulate_preopen_cancel(events):
             client = 'CANCELLED'
             out.extend(['matching_REJECT_completes_cancellation', 'no_session_error'])
         else:
-            raise AssertionError(f'unknown pre-open event {e}')
+            raise ValidationError(f'unknown pre-open event {e}')
     check(client == 'CANCELLED', 'validation check failed')
     return out
 
@@ -448,7 +478,7 @@ def simulate_terminal_ack_loss(events):
             replay = {x for x in replay if x > 7}
             out.append('B_may_compact_after_retire')
         else:
-            raise AssertionError(f'unknown retirement event {e}')
+            raise ValidationError(f'unknown retirement event {e}')
     return out
 
 def simulate_fin_supersession(events):
@@ -493,7 +523,7 @@ def simulate_fin_supersession(events):
             check(contiguous_prefix(processed) >= 3, 'validation check failed')
             out.append('TRANSMISSION_RETIRE_3_is_valid')
         else:
-            raise AssertionError(f'unknown FIN supersession event {e}')
+            raise ValidationError(f'unknown FIN supersession event {e}')
     return out
 
 def validate_semantic_oracles(root):
@@ -537,7 +567,7 @@ def validate_semantic_oracles(root):
     for name in ('data-beyond-fin', 'conflicting-terminal-size', 'stream-consumed-wrong-final', 'tombstone-data-beyond-final'):
         c = by[name]
         check(c['expected'] == 'session_error' and c['error'] == 'FINAL_SIZE_ERROR', c)
-    print(f'semantic-oracles: ok ({len(rr['cases'])} review traces, {len(cv['cases'])} confirmation cases)')
+    print(f"semantic-oracles: ok ({len(rr['cases'])} review traces, {len(cv['cases'])} confirmation cases)")
 
 def registry(root):
     s = (root / 'REGISTRIES.md').read_text()
@@ -565,4 +595,8 @@ def main():
     tcp_generated(root)
     print('validation: PASS')
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (ValidationError, SemanticValidationError) as exc:
+        print(f'validation: FAIL: {exc}', file=sys.stderr)
+        raise SystemExit(2)

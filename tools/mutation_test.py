@@ -25,6 +25,15 @@ def copy_repo(tmp):
     return dst
 
 
+def require_baseline():
+    for optimized in (False, True):
+        r=run_validate(ROOT,optimized=optimized)
+        mode='python -O' if optimized else 'ordinary'
+        if r.returncode!=0 or 'validation: PASS' not in r.stdout:
+            raise RuntimeError(f'baseline validator failed in {mode} mode: exit={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}')
+    print('mutation baseline: PASS (ordinary + python -O)')
+
+
 def expect_failure(name, mutate, regenerate_tcp=False, optimized=False):
     with tempfile.TemporaryDirectory(prefix='mpx4-mutation-') as tmp:
         repo=copy_repo(tmp)
@@ -36,6 +45,8 @@ def expect_failure(name, mutate, regenerate_tcp=False, optimized=False):
         r=run_validate(repo,optimized=optimized)
         if r.returncode==0:
             raise RuntimeError(f'{name}: validator incorrectly returned PASS')
+        if r.returncode!=2 or 'validation: FAIL:' not in r.stderr:
+            raise RuntimeError(f'{name}: validator did not report a semantic validation failure; exit={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}')
         print(f'mutation {name}: rejected')
 
 
@@ -121,14 +132,119 @@ def mutate_future_retire_ignored(repo):
 
 
 def mutate_secure_flags_self_consistent(repo):
+    p,d=load(repo,'secure-record.json'); reencrypt_record(d,flags=b'\xff'); save(p,d)
+
+
+def vi(v):
+    for width,prefix in ((1,0),(2,1),(4,2),(8,3)):
+        if 0<=v<(1<<(8*width-2)):
+            return (v|(prefix<<(8*width-2))).to_bytes(width,'big')
+    raise ValueError(v)
+
+
+def reencrypt_record(d, record_index=0, flags=None, seq=None, plain=None):
+    rec=d['records'][record_index]
+    key=bytes.fromhex(d['traffic_key_hex']); iv=bytes.fromhex(d['traffic_iv_hex'])
+    pt=bytes.fromhex(rec['plaintext_hex']) if plain is None else plain
+    fl=bytes.fromhex(rec['record_flags_hex']) if flags is None else flags
+    number=int(rec['sequence_number']) if seq is None else seq
+    seq96=b'\x00'*4+number.to_bytes(8,'big')
+    nonce=bytes(a^b for a,b in zip(iv,seq96))
+    aad=fl+vi(len(pt)); enc=AESGCM(key).encrypt(nonce,pt,aad)
+    rec.update(
+        sequence_number=str(number), plaintext_hex=pt.hex(), record_flags_hex=fl.hex(),
+        ciphertext_length=str(len(pt)), ciphertext_length_varint_hex=vi(len(pt)).hex(),
+        aad_hex=aad.hex(), seq96_hex=seq96.hex(), nonce_hex=nonce.hex(),
+        ciphertext_hex=enc[:-16].hex(), authentication_tag_hex=enc[-16:].hex(),
+        wire_record_hex=(aad+enc).hex()
+    )
+
+
+def mutate_record_zero_plaintext(repo):
+    p,d=load(repo,'secure-record.json'); reencrypt_record(d,plain=b''); save(p,d)
+
+
+def mutate_record_oversize(repo):
     p,d=load(repo,'secure-record.json')
-    key=bytes.fromhex(d['traffic_key_hex']); iv=bytes.fromhex(d['traffic_iv_hex']); rec=d['records'][0]
-    seq=int(rec['sequence_number']); pt=bytes.fromhex(rec['plaintext_hex']); flags=b'\xff'
-    clen_vi=bytes.fromhex(rec['ciphertext_length_varint_hex']); aad=flags+clen_vi
-    seq96=b'\x00'*4+seq.to_bytes(8,'big'); nonce=bytes(a^b for a,b in zip(iv,seq96))
-    enc=AESGCM(key).encrypt(nonce,pt,aad)
-    rec['record_flags_hex']='ff'; rec['aad_hex']=aad.hex(); rec['seq96_hex']=seq96.hex(); rec['nonce_hex']=nonce.hex()
-    rec['ciphertext_hex']=enc[:-16].hex(); rec['authentication_tag_hex']=enc[-16:].hex(); rec['wire_record_hex']=(aad+enc).hex()
+    plain=vi(0)+vi(65532)+b'\x00'*65532
+    if len(plain)!=65537:
+        raise RuntimeError(len(plain))
+    reencrypt_record(d,plain=plain); save(p,d)
+
+
+def mutate_record_sequence_exhausted(repo):
+    p,d=load(repo,'secure-record.json')
+    d['records'].append(json.loads(json.dumps(d['records'][0])))
+    reencrypt_record(d,record_index=-1,seq=1<<24)
+    save(p,d)
+
+
+def mutate_record_incomplete_frame(repo):
+    p,d=load(repo,'secure-record.json'); reencrypt_record(d,plain=b'\x01'); save(p,d)
+
+
+def mutate_state_below_final_still_error(repo):
+    p,d=load(repo,'state-validity.json')
+    c=next(x for x in d['cases'] if x['name']=='data-beyond-fin')
+    c['conditions']={'end_offset':'<= final_offset','bytes':'consistent'}
+    save(p,d)
+
+
+def mutate_state_recv_active_still_final_error(repo):
+    p,d=load(repo,'state-validity.json')
+    c=next(x for x in d['cases'] if x['name']=='data-beyond-fin')
+    c['state']='RECV_ACTIVE'; c['conditions']={'end_offset':'within retained credit','bytes':'consistent'}
+    save(p,d)
+
+
+def mutate_state_add_unhandled_invalid_case(repo):
+    p,d=load(repo,'state-validity.json')
+    d['cases'].append({'name':'review-extra-invalid-open','state':'UNSEEN responder','frame':'STREAM_DATA','expected':'apply'})
+    save(p,d)
+
+
+def mutate_ambiguity_discard_identity(repo):
+    p,d=load(repo,'handshake-ambiguity.json')
+    c=next(x for x in d['cases'] if x['name']=='create-server-finished-lost')
+    c['session_id_retained']=False; c['recovery_action']='CREATE_same_session_id'
+    save(p,d)
+
+
+def mutate_recovery_terminal_stream(repo):
+    p,d=load(repo,'recovery-progress.json')
+    next(x for x in d['cases'] if x['name']=='stream-probe-after-recovery')['stream_state']='terminal'
+    save(p,d)
+
+
+def mutate_recovery_closed_session(repo):
+    p,d=load(repo,'recovery-progress.json')
+    c=next(x for x in d['cases'] if x['name']=='dormant-recovery-session-credit')
+    c['session_state']='CLOSED'; c['retained_session_credit']=False
+    save(p,d)
+
+
+def mutate_recovery_zero_retire(repo):
+    p,d=load(repo,'recovery-progress.json')
+    c=next(x for x in d['cases'] if x['name']=='retire-refresh-after-recovery')
+    c['retired_through']=0; c['can_release_peer_state']=False
+    save(p,d)
+
+
+def mutate_terminal_below_commitment(repo):
+    p,d=load(repo,'terminal-flow-control.json')
+    next(x for x in d['cases'] if x['name']=='fin-at-stream-credit')['final_offset']=7
+    save(p,d)
+
+
+def mutate_terminal_frame_ping(repo):
+    p,d=load(repo,'terminal-flow-control.json')
+    next(x for x in d['cases'] if x['name']=='fin-beyond-stream-credit')['frame']='PING'
+    save(p,d)
+
+
+def mutate_state_case_expected(repo, case_name):
+    p,d=load(repo,'state-validity.json')
+    next(x for x in d['cases'] if x['name']==case_name)['expected']='__IMPOSSIBLE_OUTCOME__'
     save(p,d)
 
 
@@ -220,6 +336,19 @@ def main():
         ('reset-late-data-delivery',mutate_reset_late_data_delivery,False,False),
         ('future-retire-ignored',mutate_future_retire_ignored,False,False),
         ('secure-record-self-consistent-flags',mutate_secure_flags_self_consistent,True,False),
+        ('record-zero-plaintext',mutate_record_zero_plaintext,True,False),
+        ('record-oversize-plaintext',mutate_record_oversize,True,False),
+        ('record-sequence-key-limit',mutate_record_sequence_exhausted,True,False),
+        ('record-incomplete-frame',mutate_record_incomplete_frame,True,False),
+        ('state-input-below-final',mutate_state_below_final_still_error,False,False),
+        ('state-input-recv-active',mutate_state_recv_active_still_final_error,False,False),
+        ('state-unhandled-case-fail-closed',mutate_state_add_unhandled_invalid_case,False,False),
+        ('ambiguity-retained-identity',mutate_ambiguity_discard_identity,False,False),
+        ('recovery-terminal-stream',mutate_recovery_terminal_stream,False,False),
+        ('recovery-closed-session',mutate_recovery_closed_session,False,False),
+        ('recovery-zero-retire',mutate_recovery_zero_retire,False,False),
+        ('terminal-final-below-commitment',mutate_terminal_below_commitment,False,False),
+        ('terminal-nonterminal-frame',mutate_terminal_frame_ping,False,False),
         ('max-carriers-expected',mutate_max_carriers_expected,False,False),
         ('session-lifecycle-expected',mutate_session_lifecycle_expected,False,False),
         ('version-compatibility-expected',mutate_version_expected,False,False),
@@ -233,9 +362,18 @@ def main():
         ('terminal-flow-control-expected',mutate_terminal_flow_expected,False,False),
         ('close-ordering-expected',mutate_close_order_expected,False,False),
     ]
+    require_baseline()
     for name,fn,regen,opt in tests:
         expect_failure(name,fn,regenerate_tcp=regen,optimized=opt)
-    print(f'mutation-tests: PASS ({len(tests)} corruptions rejected)')
+
+    state=json.loads((ROOT/'test-vectors/state-validity.json').read_text())
+    state_names=[c['name'] for c in state['cases'] if 'expected' in c]
+    for case_name in state_names:
+        expect_failure(
+            'state-expected-'+case_name,
+            lambda repo,n=case_name: mutate_state_case_expected(repo,n),
+        )
+    print(f'mutation-tests: PASS ({len(tests)+len(state_names)} corruptions rejected; state expected coverage {len(state_names)}/{len(state_names)})')
 
 
 if __name__=='__main__':
