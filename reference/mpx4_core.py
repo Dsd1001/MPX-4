@@ -457,6 +457,8 @@ def frame_body(frame_type: int, **fields: object) -> bytes:
         return i("token")
     if frame_type == FRAME_STREAM_OPEN or frame_type == FRAME_STREAM_OPEN_OK:
         return i("stream_id") + i("transmission_id")
+    if frame_type == FRAME_STREAM_OPEN_REJECT:
+        return i("stream_id") + i("transmission_id") + i("error_code")
     if frame_type == FRAME_STREAM_DATA:
         data = fields["data"]
         if not isinstance(data, (bytes, bytearray)):
@@ -470,6 +472,16 @@ def frame_body(frame_type: int, **fields: object) -> bytes:
         return i("consumed_bytes") + i("maximum_bytes")
     if frame_type == FRAME_STREAM_FIN:
         return i("stream_id") + i("transmission_id") + i("final_offset")
+    if frame_type == FRAME_RESET_STREAM:
+        return i("stream_id") + i("transmission_id") + i("final_offset") + i("stream_error_code")
+    if frame_type == FRAME_STOP_SENDING:
+        return i("stream_id") + i("transmission_id") + i("stream_error_code")
+    if frame_type == FRAME_STREAM_CONSUMED:
+        return i("stream_id") + i("transmission_id") + i("final_offset")
+    if frame_type == FRAME_TRANSMISSION_RETIRE:
+        return i("retired_through")
+    if frame_type == FRAME_CREDIT_PROBE:
+        return i("stream_id")
     if frame_type == FRAME_CARRIER_CLOSE or frame_type == FRAME_SESSION_CLOSE:
         reason = str(fields.get("reason", "")).encode("utf-8")
         if len(reason) > 256:
@@ -496,6 +508,10 @@ def parse_frame_body(frame_type: int, body: bytes, max_frame_payload: int) -> Di
     elif frame_type in (FRAME_STREAM_OPEN, FRAME_STREAM_OPEN_OK):
         get("stream_id")
         get("transmission_id")
+    elif frame_type == FRAME_STREAM_OPEN_REJECT:
+        get("stream_id")
+        get("transmission_id")
+        get("error_code")
     elif frame_type == FRAME_STREAM_DATA:
         get("stream_id")
         get("offset")
@@ -524,6 +540,23 @@ def parse_frame_body(frame_type: int, body: bytes, max_frame_payload: int) -> Di
         get("stream_id")
         get("transmission_id")
         get("final_offset")
+    elif frame_type == FRAME_RESET_STREAM:
+        get("stream_id")
+        get("transmission_id")
+        get("final_offset")
+        get("stream_error_code")
+    elif frame_type == FRAME_STOP_SENDING:
+        get("stream_id")
+        get("transmission_id")
+        get("stream_error_code")
+    elif frame_type == FRAME_STREAM_CONSUMED:
+        get("stream_id")
+        get("transmission_id")
+        get("final_offset")
+    elif frame_type == FRAME_TRANSMISSION_RETIRE:
+        get("retired_through")
+    elif frame_type == FRAME_CREDIT_PROBE:
+        get("stream_id")
     elif frame_type in (FRAME_CARRIER_CLOSE, FRAME_SESSION_CLOSE):
         get("error_code")
         get("trigger_frame_type")

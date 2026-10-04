@@ -60,7 +60,10 @@ Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cr
 - Adds a Gate 1 process harness that launches Client and Server separately, verifies per-Stream application bytes/digests, credit-before-DATA ordering, 16 simultaneous Streams, 1 MiB in each direction, and full-duplex overlap using each endpoint's own event order rather than cross-clock subtraction.
 - Adds a TCP fault-proxy scaffold for deterministic byte fragmentation, delay/backpressure, and connection abort. The proxy does not model UDP-style Record dropping on an ordered TCP Carrier.
 - CI runs both direct and fragmented-proxy Gate 1 integration on Python 3.11 and 3.12.
-- These results are reference-to-reference integration evidence only; they do not claim complete A-L Mandatory coverage, independent A/B interoperability, or Protocol Version 4 stability.
+- Adds a Gate 2 Session-level runtime and process harness for deterministic real-TCP fault/recovery scenarios without changing the Draft 11 wire format.
+- Gate 2 currently exercises sparse-ID Carrier JOIN, cross-Carrier same-Transmission reinjection and duplicate suppression, unexpected Carrier loss, higher-Generation replacement with fresh Carrier record spaces, two-stage DORMANT recovery with credit/retirement refresh, ambiguous SERVER_FINISHED loss after Server commit for both replacement and first-use Carrier identity, FIN/STOP_SENDING/RESET_STREAM supersession with late FIN reinjection and retirement-prefix closure, and Session-scoped TRANSMISSION_ID_ERROR from a never-allocated acknowledgement.
+- The complete Gate 2 scenario set also runs with 257-octet endpoint TCP write fragmentation so the recovery evidence does not depend on write boundaries.
+- These results are reference-to-reference integration/fault evidence only; they do not claim complete A-L Mandatory coverage, independent A/B interoperability, or Protocol Version 4 stability.
 
 ### Compatibility
 

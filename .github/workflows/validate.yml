@@ -32,5 +32,9 @@ jobs:
         run: python reference/interop_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate1"
       - name: Reference Gate 1 fragmented TCP integration
         run: python reference/interop_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate1-fragmented" --case-id gate1-proxy-fragmented --write-chunk 257 --proxy-max-chunk 1024
+      - name: Reference Gate 2 fault and recovery integration
+        run: python reference/gate2_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate2"
+      - name: Reference Gate 2 fragmented-write fault and recovery integration
+        run: python reference/gate2_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate2-fragmented" --write-chunk 257
       - name: Ensure generated files are committed
         run: git diff --exit-code
