@@ -612,9 +612,13 @@ Optional groups are reported separately.
 
 ### 18.1. Repository executable evidence (non-normative)
 
-The repository's executable Gate 3 runner maps the Mandatory profile above to 121 explicit case IDs and requires all A–L groups to pass. Gate 4 adds a second source-isolated implementation and a neutral process harness. The aggregate Gate 4 result requires both implementations to pass all 121 Mandatory cases and requires real-TCP A→B and B→A role reversal for the baseline full-duplex profile and the deterministic multi-Carrier/fault scenarios, both direct and under endpoint write fragmentation.
+The repository's executable Gate 3 runner maps the Mandatory profile above to 121 explicit case IDs and records the evidence class for every case as `model`, `codec`, `endpoint-wire`, or `cross-wire`. A profile PASS requires all A–L case IDs to pass their declared checks, but model-only cases are reported explicitly and MUST NOT be represented as authenticated endpoint acceptance.
 
-The repository's second implementation is source/module isolated from the reference implementation and validator at runtime, but both implementations are maintained in the same repository and test project. This evidence therefore supports the Core interoperability claim defined by this document without asserting separate organizational or third-party development.
+Review-sensitive receive and failure-scope cases are additionally bound to `endpoint-wire` probes. These probes use real loopback TCP, complete CREATE/Finished, exchange authenticated Secure Records, and inspect both wire-visible responses and endpoint state. Coverage-sensitivity controls deliberately break selected real handlers and require the corresponding endpoint-wire case to fail.
+
+Gate 4 adds a second source-isolated implementation and a neutral process harness. The aggregate requires both mixed-evidence 121-case profiles, the authenticated endpoint-wire and sensitivity suites, and real-TCP A→B/B→A role reversal for the baseline full-duplex and deterministic multi-Carrier/fault scenarios, both direct and under endpoint write fragmentation.
+
+The repository's second implementation is source/module isolated from the reference implementation and validator at runtime, but both implementations are maintained in the same repository and test project. This evidence is useful interoperability evidence without asserting separate organizational or third-party development. While either profile contains model-only Mandatory case IDs, the aggregate result MUST NOT be described as complete Mandatory Core endpoint interoperability.
 
 These executable gates are evidence for Draft 11 interoperability only. They do not replace the separate requirements for a Protocol Version Stability Declaration.
 

@@ -91,10 +91,41 @@ def implementation_b_dependency_audit() -> dict:
     }
     check(hashes["reference_core_sha256"] != hashes["independent_core_sha256"], "A/B core source identical")
     check(hashes["reference_endpoint_sha256"] != hashes["independent_endpoint_sha256"], "A/B endpoint source identical")
+
+    def function_asts(path: Path) -> Dict[str, str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        return {
+            node.name: ast.dump(node, include_attributes=False)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+    critical = (
+        "handle_frame",
+        "handle_stream_data",
+        "handle_stream_fin",
+        "handle_reset_stream",
+        "receive_loop",
+    )
+    a_runtime = function_asts(ROOT / "reference" / "gate2_runtime.py")
+    b_runtime = function_asts(ROOT / "independent" / "gate_runtime.py")
+    critical_ast = {
+        name: {
+            "present_in_a": name in a_runtime,
+            "present_in_b": name in b_runtime,
+            "ast_identical": a_runtime.get(name) == b_runtime.get(name),
+        }
+        for name in critical
+    }
+    check(
+        all(v["present_in_a"] and v["present_in_b"] and not v["ast_identical"] for v in critical_ast.values()),
+        f"A/B critical runtime handlers are not structurally isolated: {critical_ast}",
+    )
     return {
         "status": "PASS",
         "python_files_checked": len(python_files),
         "forbidden_import_violations": [],
+        "critical_runtime_ast_comparison": critical_ast,
         **hashes,
         "independence_scope": (
             "runtime source/module isolation only; both implementations are in the same "
@@ -114,11 +145,23 @@ def verify_profile(report: dict, label: str) -> dict:
     check(all(c.get("status") == "PASS" for c in cases), f"{label} case failure")
     ids = [c.get("id") for c in cases]
     check(len(set(ids)) == MANDATORY_COUNT, f"{label} duplicate case ID")
+    evidence_counts = report.get("evidence_counts") or {}
+    check(set(evidence_counts) == {"model", "codec", "endpoint-wire", "cross-wire"}, f"{label} evidence classes")
+    check(sum(int(v) for v in evidence_counts.values()) == MANDATORY_COUNT, f"{label} evidence count total")
+    model_only = report.get("model_only_case_ids") or []
+    endpoint_ids = report.get("endpoint_wire_mandatory_case_ids") or []
+    check(len(model_only) == int(evidence_counts["model"]), f"{label} model-only count")
+    check(len(endpoint_ids) == int(evidence_counts["endpoint-wire"]), f"{label} endpoint-wire count")
+    check(int(report.get("endpoint_wire_execution_count") or 0) >= 48, f"{label} endpoint-wire executions")
     return {
         "status": "PASS",
         "mandatory_case_count": MANDATORY_COUNT,
         "groups": groups,
         "implementation": report.get("implementation"),
+        "evidence_counts": evidence_counts,
+        "endpoint_wire_execution_count": report.get("endpoint_wire_execution_count"),
+        "endpoint_wire_mandatory_case_ids": endpoint_ids,
+        "model_only_case_ids": model_only,
     }
 
 
@@ -192,6 +235,33 @@ def execute(out_dir: Path) -> dict:
     run([sys.executable, "-m", "independent.profile", "--out-dir", str(b_dir)])
     ref_profile = verify_profile(read(ref_dir / "gate3-report.json"), "reference")
     b_profile = verify_profile(read(b_dir / "mandatory-profile-report.json"), "independent")
+    check(
+        ref_profile["evidence_counts"] == b_profile["evidence_counts"],
+        "A/B profile evidence classification differs",
+    )
+
+    endpoint_wire_dir = out_dir / "endpoint-wire-both"
+    sensitivity_dir = out_dir / "endpoint-sensitivity"
+    run([
+        sys.executable,
+        "-m",
+        "interop.endpoint_wire",
+        "--out-dir",
+        str(endpoint_wire_dir),
+    ])
+    endpoint_wire = read(endpoint_wire_dir / "endpoint-wire-report.json")
+    check(endpoint_wire.get("status") == "PASS", "aggregate endpoint-wire suite failed")
+    check(endpoint_wire.get("execution_count") == 96, "expected 96 authenticated endpoint-wire executions")
+    run([
+        sys.executable,
+        "-m",
+        "interop.endpoint_sensitivity",
+        "--out-dir",
+        str(sensitivity_dir),
+    ])
+    sensitivity = read(sensitivity_dir / "endpoint-sensitivity-report.json")
+    check(sensitivity.get("status") == "PASS", "endpoint sensitivity suite failed")
+    check(sensitivity.get("control_count") == 8, "expected eight deliberate-defect sensitivity controls")
 
     basic = []
     faults = []
@@ -220,27 +290,38 @@ def execute(out_dir: Path) -> dict:
         "implementation_a": ref_profile,
         "implementation_b": b_profile,
         "implementation_b_dependency_audit": audit,
+        "authenticated_endpoint_wire": {
+            "status": endpoint_wire["status"],
+            "execution_count": endpoint_wire["execution_count"],
+            "evidence_class": endpoint_wire.get("evidence_class"),
+        },
+        "endpoint_coverage_sensitivity": {
+            "status": sensitivity["status"],
+            "control_count": sensitivity["control_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
         "cross_fault_scenario_execution_count": cross_fault_scenarios,
         "fragmented_write_chunk": 257,
         "mandatory_result": {
-            "implementation_a": "121/121 PASS",
-            "implementation_b": "121/121 PASS",
-            "groups_a_through_l": "PASS for both implementations",
+            "implementation_a_profile": "121/121 PASS",
+            "implementation_b_profile": "121/121 PASS",
+            "groups_a_through_l": "PASS for both mixed-evidence profiles",
+            "evidence_counts_per_implementation": ref_profile["evidence_counts"],
+            "complete_endpoint_mandatory_acceptance": False,
+            "reason": "model-only Mandatory case IDs remain explicitly reported by each profile",
         },
         "claim": (
-            "Gate 4 PASS: two source-isolated MPX/4 implementations each pass the "
-            "121-case A-L Mandatory profile and interoperate over real TCP in both "
-            "client/server role directions for the basic full-duplex profile and the "
-            "five deterministic multi-Carrier/fault scenarios, both direct and with "
-            "257-byte endpoint write fragmentation."
+            "Gate 4 aggregate PASS: both source-isolated runtimes pass the mixed-evidence 121-case A-L profile; "
+            "96 authenticated endpoint-wire executions and eight deliberate-defect sensitivity controls pass; "
+            "A/B real-TCP role reversal passes the basic and five fault profiles in direct and fragmented modes."
         ),
         "claim_boundary": (
-            "Implementation B shares this repository, protocol fixtures, and test scenario design "
-            "with Implementation A. It imports no reference/tools/validator runtime source, but the "
-            "result is not a claim of independent development by an external organization."
+            "This result does not claim complete endpoint execution of every Mandatory case. Cases classified as model-only "
+            "remain oracle/state evidence and are listed in each profile; therefore Gate 4 must not be summarized as complete "
+            "Mandatory Core endpoint interoperability. Implementation B also shares this repository, fixtures, and test design "
+            "with Implementation A, so no external organizational independence is claimed."
         ),
     }
 
@@ -259,10 +340,12 @@ def main() -> int:
         report = execute(args.out_dir)
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(
-            "Gate 4: PASS "
-            "(A=121/121, B=121/121, "
-            f"{report['cross_basic_run_count']} cross-basic runs, "
-            f"{report['cross_fault_scenario_execution_count']} cross-fault scenario executions)"
+            "Gate 4 aggregate: PASS "
+            "(A profile=121/121, B profile=121/121, "
+            f"endpoint-wire={report['authenticated_endpoint_wire']['execution_count']}, "
+            f"sensitivity={report['endpoint_coverage_sensitivity']['control_count']}, "
+            f"{report['cross_basic_run_count']} cross-basic, "
+            f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
         )
         print(f"report: {path}")
         return 0

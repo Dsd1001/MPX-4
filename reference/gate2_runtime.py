@@ -74,11 +74,20 @@ from .mpx4_core import (
 )
 
 ERROR_NO_ERROR = 0x00
+ERROR_PROTOCOL_VIOLATION = 0x02
+ERROR_AUTHENTICATION_FAILED = 0x03
 ERROR_RESOURCE_LIMIT = 0x05
 ERROR_SESSION_CONFLICT = 0x07
+ERROR_STREAM_LIMIT = 0x08
 ERROR_FLOW_CONTROL = 0x09
+ERROR_FRAME_ENCODING = 0x0A
 ERROR_CARRIER_CONFLICT = 0x0C
+ERROR_STREAM_STATE = 0x0E
+ERROR_FINAL_SIZE = 0x0F
 ERROR_TRANSMISSION_ID = 0x10
+
+STREAM_CREDIT_WINDOW_LIMIT = 16 * 1024 * 1024
+SESSION_CREDIT_WINDOW_LIMIT = 128 * 1024 * 1024
 
 STREAM_REASON_TEST = 0x09
 
@@ -102,6 +111,10 @@ class CandidateReject(RuntimeError):
     def __init__(self, error_code: int, message: str) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+class StreamStateError(ProtocolError):
+    pass
 
 
 def transport_key_from_env() -> bytes:
@@ -150,6 +163,7 @@ class TxState:
 class StreamState:
     stream_id: int
     local_maximum: int = 1024 * 1024
+    peer_consumed: int = 0
     peer_maximum: int = 0
     recv_committed: int = 0
     recv_next: int = 0
@@ -159,6 +173,7 @@ class StreamState:
     terminal_mode: str = "ACTIVE"
     stream_error_code: Optional[int] = None
     recv_segments: Dict[int, bytes] = field(default_factory=dict)
+    recv_history: Dict[int, bytes] = field(default_factory=dict)
     recv_data: bytearray = field(default_factory=bytearray)
     open_event: asyncio.Event = field(default_factory=asyncio.Event)
     credit_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -210,6 +225,7 @@ class Gate2Session:
         self.peer_retired_through = 0
 
         self.session_local_maximum = 8 * 1024 * 1024
+        self.session_peer_consumed = 0
         self.session_peer_maximum = 0
         self.session_recv_committed = 0
         self.session_send_committed = 0
@@ -255,6 +271,8 @@ class Gate2Session:
         )
 
     def validate_server_candidate(self, init) -> None:
+        if self.state in {"CLOSING", "CLOSED"}:
+            raise CandidateReject(ERROR_SESSION_CONFLICT, "Session is closing; candidate JOIN/CREATE forbidden")
         if init.session_action == 0:
             if self.session_id is not None:
                 raise CandidateReject(ERROR_SESSION_CONFLICT, "CREATE collided with retained Session")
@@ -590,6 +608,25 @@ class Gate2Session:
             return True
         return False
 
+    def merge_credit_pair(
+        self,
+        old_consumed: int,
+        old_maximum: int,
+        new_consumed: int,
+        new_maximum: int,
+        window_limit: int,
+        label: str,
+    ) -> Tuple[int, int, str]:
+        if new_consumed < 0 or new_maximum < new_consumed:
+            raise FlowControlError(f"invalid {label} credit")
+        if new_maximum - new_consumed > window_limit:
+            raise FlowControlError(f"{label} credit window exceeds Draft 11 limit")
+        if new_consumed >= old_consumed and new_maximum >= old_maximum:
+            return new_consumed, new_maximum, "newer"
+        if new_consumed <= old_consumed and new_maximum <= old_maximum:
+            return old_consumed, old_maximum, "stale"
+        raise FlowControlError(f"crossed {label} credit pair")
+
     async def acknowledge(
         self,
         incoming: Carrier,
@@ -615,38 +652,107 @@ class Gate2Session:
     async def receive_loop(self, carrier: Carrier) -> None:
         try:
             while self.state not in {"CLOSING", "CLOSED"}:
-                frames = await carrier.recv_record()
+                try:
+                    frames = await carrier.recv_record()
+                except AuthenticationError as exc:
+                    await self.fail_carrier(
+                        carrier,
+                        ERROR_AUTHENTICATION_FAILED,
+                        0,
+                        f"AUTHENTICATION_FAILED: {exc}",
+                        report=False,
+                    )
+                    return
+                except ProtocolError as exc:
+                    await self.fail_carrier(
+                        carrier,
+                        ERROR_FRAME_ENCODING,
+                        0,
+                        f"FRAME_ENCODING_ERROR: {exc}",
+                        report=True,
+                    )
+                    return
+
+                if self.state in {"CLOSING", "CLOSED"}:
+                    return
                 for frame_type, fields in frames:
-                    await self.handle_frame(carrier, frame_type, fields)
+                    if self.state in {"CLOSING", "CLOSED"}:
+                        return
+                    try:
+                        await self.handle_frame(carrier, frame_type, fields)
+                    except TransmissionError as exc:
+                        await self.fail_session(
+                            ERROR_TRANSMISSION_ID,
+                            frame_type,
+                            f"TRANSMISSION_ID_ERROR: {exc}",
+                            carrier,
+                        )
+                    except FlowControlError as exc:
+                        await self.fail_session(
+                            ERROR_FLOW_CONTROL,
+                            frame_type,
+                            f"FLOW_CONTROL_ERROR: {exc}",
+                            carrier,
+                        )
+                    except FinalSizeError as exc:
+                        await self.fail_session(
+                            ERROR_FINAL_SIZE,
+                            frame_type,
+                            f"FINAL_SIZE_ERROR: {exc}",
+                            carrier,
+                        )
+                    except StreamStateError as exc:
+                        await self.fail_session(
+                            ERROR_STREAM_STATE,
+                            frame_type,
+                            f"STREAM_STATE_ERROR: {exc}",
+                            carrier,
+                        )
+                    except ProtocolError as exc:
+                        await self.fail_session(
+                            ERROR_PROTOCOL_VIOLATION,
+                            frame_type,
+                            f"PROTOCOL_VIOLATION: {exc}",
+                            carrier,
+                        )
                     if self.state in {"CLOSING", "CLOSED"}:
                         return
         except asyncio.IncompleteReadError:
             await self.on_carrier_lost(carrier, "transport-eof")
         except (ConnectionError, BrokenPipeError):
             await self.on_carrier_lost(carrier, "transport-error")
-        except TransmissionError as exc:
-            await self.fail_session(
-                ERROR_TRANSMISSION_ID,
-                FRAME_TRANSMISSION_ACK,
-                f"TRANSMISSION_ID_ERROR: {exc}",
-                carrier,
-            )
-        except FlowControlError as exc:
-            await self.fail_session(
-                ERROR_FLOW_CONTROL,
-                FRAME_STREAM_DATA,
-                f"FLOW_CONTROL_ERROR: {exc}",
-                carrier,
-            )
-        except (ProtocolError, FinalSizeError, AuthenticationError) as exc:
-            self.fatal_error = f"{type(exc).__name__}: {exc}"
-            self.trace.emit(
-                "runtime_error",
-                **carrier.base_trace(),
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-            self.done_event.set()
+
+    async def fail_carrier(
+        self,
+        carrier: Carrier,
+        error_code: int,
+        trigger_frame_type: int,
+        reason: str,
+        report: bool,
+    ) -> None:
+        current = self.carriers.get(carrier.carrier_id)
+        if current is None or current.generation != carrier.generation:
+            return
+        if report:
+            try:
+                await self.send_frame(
+                    carrier,
+                    FRAME_CARRIER_CLOSE,
+                    error_code=error_code,
+                    trigger_frame_type=trigger_frame_type,
+                    reason=reason[:256],
+                )
+            except Exception:
+                pass
+        self.trace.emit(
+            "carrier_failed",
+            **carrier.base_trace(),
+            error_code=error_code,
+            trigger_frame_type=trigger_frame_type,
+            reason=reason,
+        )
+        await self._close_writer(carrier)
+        await self.on_carrier_lost(carrier, reason)
 
     async def fail_session(
         self,
@@ -709,9 +815,26 @@ class Gate2Session:
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"])
             maximum = int(fields["maximum_bytes"])
-            if maximum < consumed:
-                raise FlowControlError("invalid Session credit")
-            self.session_peer_maximum = max(self.session_peer_maximum, maximum)
+            (
+                self.session_peer_consumed,
+                self.session_peer_maximum,
+                merge_result,
+            ) = self.merge_credit_pair(
+                self.session_peer_consumed,
+                self.session_peer_maximum,
+                consumed,
+                maximum,
+                SESSION_CREDIT_WINDOW_LIMIT,
+                "Session",
+            )
+            self.trace.emit(
+                "credit_merge",
+                session_id=self.session_id.hex() if self.session_id else None,
+                scope="session",
+                consumed=consumed,
+                maximum=maximum,
+                result=merge_result,
+            )
             self.session_credit_event.set()
             return
 
@@ -719,12 +842,26 @@ class Gate2Session:
             stream_id = int(fields["stream_id"])
             stream = self.streams.get(stream_id)
             if stream is None:
-                raise ProtocolError("Stream credit for unknown Stream")
+                raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
-            if maximum < consumed:
-                raise FlowControlError("invalid Stream credit")
-            stream.peer_maximum = max(stream.peer_maximum, maximum)
+            stream.peer_consumed, stream.peer_maximum, merge_result = self.merge_credit_pair(
+                stream.peer_consumed,
+                stream.peer_maximum,
+                consumed,
+                maximum,
+                STREAM_CREDIT_WINDOW_LIMIT,
+                "Stream",
+            )
+            self.trace.emit(
+                "credit_merge",
+                session_id=self.session_id.hex() if self.session_id else None,
+                scope="stream",
+                stream_id=stream_id,
+                consumed=consumed,
+                maximum=maximum,
+                result=merge_result,
+            )
             stream.credit_event.set()
             return
 
@@ -854,10 +991,30 @@ class Gate2Session:
         raise ProtocolError(f"Gate 2 runtime does not handle {FRAME_NAMES.get(frame_type, frame_type)}")
 
     async def handle_stream_open(self, incoming: Carrier, fields: Dict[str, object]) -> None:
+        if self.role != "server":
+            raise StreamStateError("server-initiated Streams are not defined by Draft 11 Core")
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
+        if stream_id <= 0 or stream_id % 2 == 0:
+            raise StreamStateError("invalid client-initiated Stream ID")
         duplicate = self.register_peer_tx(FRAME_STREAM_OPEN, fields)
         stream = self.streams.get(stream_id)
+        if stream is not None and not duplicate:
+            raise TransmissionError("STREAM_OPEN reused Stream ID with a different Transmission")
+        if stream is None and len(self.streams) >= self.local_limits.max_streams:
+            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            await self.send_frame(
+                reply,
+                FRAME_STREAM_OPEN_REJECT,
+                stream_id=stream_id,
+                transmission_id=txid,
+                error_code=ERROR_STREAM_LIMIT,
+            )
+            self.peer_tx_confirmation[txid] = (
+                FRAME_STREAM_OPEN_REJECT,
+                {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_LIMIT},
+            )
+            return
         if stream is None:
             stream = StreamState(stream_id=stream_id)
             self.streams[stream_id] = stream
@@ -886,35 +1043,65 @@ class Gate2Session:
             {"stream_id": stream_id, "transmission_id": txid},
         )
 
+    def validate_stream_byte_identity(self, stream: StreamState, offset: int, data: bytes) -> None:
+        end = offset + len(data)
+        for old_offset, old_data in stream.recv_history.items():
+            old_end = old_offset + len(old_data)
+            overlap_start = max(offset, old_offset)
+            overlap_end = min(end, old_end)
+            if overlap_start >= overlap_end:
+                continue
+            new_slice = data[overlap_start - offset : overlap_end - offset]
+            old_slice = old_data[overlap_start - old_offset : overlap_end - old_offset]
+            if new_slice != old_slice:
+                raise ProtocolError("conflicting overlapping Stream bytes")
+
     async def handle_stream_data(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         offset = int(fields["offset"])
         txid = int(fields["transmission_id"])
         data = bytes(fields["data"])  # type: ignore[arg-type]
-        duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
         stream = self.streams.get(stream_id)
         if stream is None:
-            raise ProtocolError("DATA for unknown Stream")
+            raise StreamStateError("DATA for unknown Stream")
         end = offset + len(data)
+        if stream.recv_final is not None and end > stream.recv_final:
+            raise FinalSizeError("DATA exceeds established Final Offset")
         if end > stream.local_maximum:
             raise FlowControlError("Stream credit exceeded")
 
+        duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
         if not duplicate:
+            self.validate_stream_byte_identity(stream, offset, data)
+            stream.recv_history[offset] = data
             old_committed = stream.recv_committed
-            stream.recv_committed = max(stream.recv_committed, end)
-            delta = stream.recv_committed - old_committed
+            new_committed = max(stream.recv_committed, end)
+            delta = new_committed - old_committed
             if self.session_recv_committed + delta > self.session_local_maximum:
                 raise FlowControlError("Session credit exceeded")
             self.session_recv_committed += delta
-            existing = stream.recv_segments.get(offset)
-            if existing is not None and existing != data:
-                raise TransmissionError("conflicting Stream bytes")
-            stream.recv_segments[offset] = data
-            while stream.recv_next in stream.recv_segments:
-                chunk = stream.recv_segments.pop(stream.recv_next)
-                stream.recv_data.extend(chunk)
-                stream.recv_next += len(chunk)
-                self.application_rx_bytes += len(chunk)
+            stream.recv_committed = new_committed
+
+            if stream.terminal_mode == "RESET":
+                self.application_duplicate_bytes_suppressed += len(data)
+                self.trace.emit(
+                    "application_delivery_suppressed",
+                    session_id=self.session_id.hex() if self.session_id else None,
+                    stream_id=stream_id,
+                    transmission_id=txid,
+                    reason="RESET authoritative",
+                    data_length=len(data),
+                )
+            else:
+                existing = stream.recv_segments.get(offset)
+                if existing is not None and existing != data:
+                    raise TransmissionError("conflicting Stream bytes")
+                stream.recv_segments[offset] = data
+                while stream.recv_next in stream.recv_segments:
+                    chunk = stream.recv_segments.pop(stream.recv_next)
+                    stream.recv_data.extend(chunk)
+                    stream.recv_next += len(chunk)
+                    self.application_rx_bytes += len(chunk)
         else:
             self.application_duplicate_bytes_suppressed += len(data)
 
@@ -1046,6 +1233,8 @@ class Gate2Session:
             stream.reset_sent_event.set()
 
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
+        if self.state != "ACTIVE":
+            raise RuntimeError("new Stream forbidden unless Session is ACTIVE")
         stream = StreamState(stream_id=stream_id)
         self.streams[stream_id] = stream
         tx = self.alloc_tx(FRAME_STREAM_OPEN, stream_id)
@@ -1211,6 +1400,8 @@ async def client_handshake(
     carrier_id: int,
     generation: int,
 ) -> Carrier:
+    if session.state in {"CLOSING", "CLOSED"}:
+        raise RuntimeError("Session is closing; no new Carrier candidate may be created")
     if session.session_id is None:
         raise RuntimeError("Client Session ID not initialized")
     session.highest_attempted[carrier_id] = max(

@@ -527,15 +527,11 @@ def parse_frame_body(frame_type: int, body: bytes, max_frame_payload: int) -> Di
         get("receiver_timestamp_us")
     elif frame_type == FRAME_STREAM_CREDIT:
         get("stream_id")
-        consumed = get("consumed_offset")
-        maximum = get("maximum_offset")
-        if maximum < consumed or maximum - consumed > 16 * 1024 * 1024:
-            raise FlowControlError("invalid STREAM_CREDIT")
+        get("consumed_offset")
+        get("maximum_offset")
     elif frame_type == FRAME_SESSION_CREDIT:
-        consumed = get("consumed_bytes")
-        maximum = get("maximum_bytes")
-        if maximum < consumed or maximum - consumed > 128 * 1024 * 1024:
-            raise FlowControlError("invalid SESSION_CREDIT")
+        get("consumed_bytes")
+        get("maximum_bytes")
     elif frame_type == FRAME_STREAM_FIN:
         get("stream_id")
         get("transmission_id")
@@ -635,6 +631,7 @@ class Trace:
 @dataclass
 class StreamState:
     stream_id: int
+    peer_consumed: int = 0
     peer_maximum: int = 0
     local_maximum: int = 0
     send_offset: int = 0
@@ -813,6 +810,7 @@ class ReferenceSession:
         self.streams: Dict[int, StreamState] = {}
         self.next_txid = 1
         self.outstanding: Dict[int, Outstanding] = {}
+        self.session_peer_consumed = 0
         self.session_peer_maximum = 0
         self.session_send_committed = 0
         self.session_recv_committed = 0
@@ -826,6 +824,22 @@ class ReferenceSession:
         self.tx_application_bytes = 0
         self.rx_application_bytes = 0
         self.max_outstanding_reliable = 0
+
+    def merge_credit_pair(
+        self,
+        old_consumed: int,
+        old_maximum: int,
+        new_consumed: int,
+        new_maximum: int,
+        window_limit: int,
+    ) -> Tuple[int, int]:
+        if new_maximum < new_consumed or new_maximum - new_consumed > window_limit:
+            raise FlowControlError("invalid credit")
+        if new_consumed >= old_consumed and new_maximum >= old_maximum:
+            return new_consumed, new_maximum
+        if new_consumed <= old_consumed and new_maximum <= old_maximum:
+            return old_consumed, old_maximum
+        raise FlowControlError("crossed credit pair")
 
     def alloc_tx(self, frame_type: int, stream_id: int) -> Outstanding:
         txid = self.next_txid
@@ -901,9 +915,13 @@ class ReferenceSession:
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"])
             maximum = int(fields["maximum_bytes"])
-            if maximum < consumed:
-                raise FlowControlError("invalid SESSION_CREDIT")
-            self.session_peer_maximum = max(self.session_peer_maximum, maximum)
+            self.session_peer_consumed, self.session_peer_maximum = self.merge_credit_pair(
+                self.session_peer_consumed,
+                self.session_peer_maximum,
+                consumed,
+                maximum,
+                128 * 1024 * 1024,
+            )
             self.session_credit_event.set()
             return
 
@@ -962,9 +980,13 @@ class ReferenceSession:
                 raise ProtocolError("STREAM_CREDIT for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
-            if maximum < consumed:
-                raise FlowControlError("invalid STREAM_CREDIT")
-            stream.peer_maximum = max(stream.peer_maximum, maximum)
+            stream.peer_consumed, stream.peer_maximum = self.merge_credit_pair(
+                stream.peer_consumed,
+                stream.peer_maximum,
+                consumed,
+                maximum,
+                16 * 1024 * 1024,
+            )
             stream.credit_event.set()
             return
 
@@ -1016,6 +1038,8 @@ class ReferenceSession:
         if stream is None:
             raise ProtocolError("STREAM_DATA for unknown Stream")
         end = offset + len(data)
+        if stream.recv_final is not None and end > stream.recv_final:
+            raise FinalSizeError("STREAM_DATA exceeds established Final Offset")
         if end > stream.local_maximum:
             raise FlowControlError("STREAM_DATA exceeds Stream credit")
         previous_committed = stream.recv_committed

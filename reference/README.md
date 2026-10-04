@@ -6,7 +6,7 @@ It is **not** a production proxy, Relay, scheduler implementation, performance b
 
 ## Current gate
 
-The reference implementation now completes **Gate 1**, **Gate 2**, and the full **Gate 3 A–L Mandatory profile**. Gate 4 is driven by the neutral `interop/` harness against the source-isolated peer in `independent/`.
+The reference implementation completes Gate 1 and Gate 2 runtime scenarios. Gate 3 is a **mixed-evidence 121-case A–L profile**: every case is labeled `model`, `codec`, `endpoint-wire`, or `cross-wire`, and review-driven receive/error-scope cases require authenticated endpoint-wire execution rather than model-only evidence. Gate 4 is driven by the neutral `interop/` harness against the source-isolated peer in `independent/`.
 
 Implemented runtime subset:
 
@@ -37,11 +37,15 @@ Gate 2 adds five real-TCP deterministic scenarios using separate Client and Serv
 
 The same Gate 2 suite is also run with deterministic endpoint TCP write fragmentation (`--write-chunk 257`).
 
-Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5, B1–B17, C1–C7, D1–D10, E1–E10, F1–F8, G1–G6, H1–H5, I1–I6, J1–J16, K1–K6, and L1–L25. The runner combines real TCP Gate 1/2 evidence, canonical wire/crypto reproduction, and stateful edge execution for exhaustion, tombstones, opening races, candidate admission, credit ordering, and failure scope. A Gate 3 PASS requires every one of the 121 case IDs to be present and PASS.
+Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5, B1–B17, C1–C7, D1–D10, E1–E10, F1–F8, G1–G6, H1–H5, I1–I6, J1–J16, K1–K6, and L1–L25. The current reference profile reports **18 codec, 30 cross-wire, 27 endpoint-wire, and 46 model** case IDs. The model-only IDs are included explicitly in `gate3-report.json`; they remain oracle/state evidence and are not presented as endpoint acceptance.
 
-Gate 4 then runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The neutral harness verifies both implementations at 121/121 Mandatory cases and runs A→B and B→A over real TCP for the basic full-duplex profile and all five deterministic fault scenarios, both directly and with 257-byte endpoint write fragmentation.
+`interop/endpoint_wire.py` runs the real Session runtimes over loopback TCP, completes CREATE/Finished, sends authenticated Secure Records, and verifies both endpoint roles where the rule is role-symmetric. It covers Final Offset versus DATA, RESET application-delivery suppression, Stream/Session credit pair merge and window structure, Session aggregate commitment, overlapping byte identity, Transmission-ID conflicts, Record flags/encoding Carrier scope, Stream lifecycle/limit, candidate collision, error scope/Trigger Frame Type, and shutdown blocking new work. The aggregate suite currently executes **96 cases across A/B and Client/Server roles**.
 
-The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. Passing Gates 3 and 4 also does not by itself declare Protocol Version 4 stable.
+`interop/endpoint_sensitivity.py` deliberately breaks four real handler contracts in each runtime (`fail_session`, crossed-credit rejection, Final Offset enforcement, RESET delivery suppression). The suite passes only if the guarded endpoint-wire case then fails; there are **8 sensitivity controls**.
+
+Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both mixed-evidence 121-case profiles, 96 authenticated endpoint-wire executions, eight sensitivity controls, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes.
+
+The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. Gate 4 PASS must not be summarized as complete endpoint execution of all 121 Mandatory cases while model-only entries remain. Passing these gates also does not itself declare Protocol Version 4 stable.
 
 ## Files
 
@@ -52,7 +56,7 @@ The Gate 4 independence claim is deliberately scoped to **runtime source/module 
 - `gate2_runtime.py` — scenario-driven Session-level multi-Carrier/fault runtime with JOIN, Generation replacement, DORMANT state, reinjection, retirement, credit recovery, terminal races, and Core error scope.
 - `gate2_harness.py` — launches Gate 2 Client/Server processes and independently verifies scenario-specific trace/state evidence.
 - `mandatory_model.py` — executable state engine for Mandatory edge cases that require exhaustion, tombstones, opening races, candidate admission, or invalid peer behavior.
-- `gate3_harness.py` — executes and reports every one of the 121 A–L Mandatory case IDs.
+- `gate3_harness.py` — executes and reports every one of the 121 A–L Mandatory case IDs with explicit evidence class and endpoint-wire requirements for review-sensitive receiver/error cases.
 - `selftest.py` — anchors the reference codec/crypto to the repository canonical handshake and Secure Record fixtures.
 
 ## Run
@@ -87,7 +91,12 @@ Run the same Gate 2 scenarios while fragmenting endpoint TCP writes:
       --out-dir /tmp/mpx4-gate2-fragmented \
       --write-chunk 257
 
-Run the complete 121-case Mandatory profile:
+Run authenticated endpoint-wire conformance and sensitivity controls:
+
+    python -m interop.endpoint_wire --out-dir /tmp/mpx4-endpoint-wire
+    python -m interop.endpoint_sensitivity --out-dir /tmp/mpx4-endpoint-sensitivity
+
+Run the mixed-evidence 121-case Mandatory profile:
 
     python -m reference.gate3_harness --out-dir /tmp/mpx4-gate3
 
@@ -124,9 +133,9 @@ The harness reports the repository SHA and whether the working tree was dirty. T
 Current gate status:
 
 - **Gate 0: PASS** — codec/crypto/vector baseline and mutation validation;
-- **Gate 1: PASS** — reference Client ↔ reference Server over real TCP, direct and fragmented;
+- **Gate 1: PASS** — reference Client ↔ reference Server positive real-TCP integration, direct and fragmented;
 - **Gate 2: PASS** — deterministic multi-Carrier/fault/recovery scenario suite, direct and fragmented;
-- **Gate 3: PASS** — all 121 A–L Mandatory case IDs;
-- **Gate 4: PASS** — source-isolated A/B interoperability with role reversal for the basic and five fault profiles, direct and fragmented.
+- **Gate 3 profile: PASS** — 121/121 case IDs with explicit mixed evidence; current profile includes model-only cases and does not equate them with endpoint acceptance;
+- **Gate 4 aggregate: PASS** — source-isolated A/B role reversal plus authenticated endpoint-wire and sensitivity evidence, with the same mixed-evidence boundary.
 
-Gate 4 is the repository's basis for a Draft 11 Core interoperability claim under the independence boundary above. Protocol Version 4 remains a development version until a separate Stability Declaration is made.
+The repository therefore has materially stronger Draft 11 runtime interoperability evidence, but it does **not** claim complete Mandatory Core endpoint interoperability while model-only case IDs remain. Protocol Version 4 remains a development version until a separate Stability Declaration is made.

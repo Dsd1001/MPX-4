@@ -710,6 +710,7 @@ class Carrier:
 @dataclass
 class StreamState:
     stream_id: int
+    peer_consumed: int = 0
     peer_maximum: int = 0
     local_maximum: int = 0
     send_offset: int = 0
@@ -750,6 +751,7 @@ class PeerSession:
         self.streams: Dict[int, StreamState] = {}
         self.next_txid = 1
         self.outstanding: Dict[int, Outstanding] = {}
+        self.peer_session_consumed = 0
         self.peer_session_max = 0
         self.send_committed = 0
         self.recv_committed = 0
@@ -763,6 +765,16 @@ class PeerSession:
         self.tx_bytes = 0
         self.rx_bytes = 0
         self.max_outstanding = 0
+
+    @staticmethod
+    def _merge_credit(old_c: int, old_m: int, new_c: int, new_m: int, limit: int) -> Tuple[int, int]:
+        if new_m < new_c or new_m - new_c > limit:
+            raise FlowControlError("credit structure/window")
+        if new_c >= old_c and new_m >= old_m:
+            return new_c, new_m
+        if new_c <= old_c and new_m <= old_m:
+            return old_c, old_m
+        raise FlowControlError("crossed credit")
 
     def allocate(self, frame_type: int, stream_id: int) -> Outstanding:
         item = Outstanding(self.next_txid, frame_type, stream_id)
@@ -811,9 +823,9 @@ class PeerSession:
 
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"]); maximum = int(fields["maximum_bytes"])
-            if consumed > maximum:
-                raise FlowControlError("Session credit")
-            self.peer_session_max = max(self.peer_session_max, maximum)
+            self.peer_session_consumed, self.peer_session_max = self._merge_credit(
+                self.peer_session_consumed, self.peer_session_max, consumed, maximum, 128 * 1024 * 1024
+            )
             self.session_credit.set()
             return
         if frame_type == FRAME_STREAM_OPEN:
@@ -848,9 +860,9 @@ class PeerSession:
             if st is None:
                 raise ProtocolError("credit unknown Stream")
             consumed = int(fields["consumed_offset"]); maximum = int(fields["maximum_offset"])
-            if consumed > maximum:
-                raise FlowControlError("Stream credit")
-            st.peer_maximum = max(st.peer_maximum, maximum)
+            st.peer_consumed, st.peer_maximum = self._merge_credit(
+                st.peer_consumed, st.peer_maximum, consumed, maximum, 16 * 1024 * 1024
+            )
             st.credit_event.set()
             return
         if frame_type == FRAME_STREAM_DATA:
@@ -885,6 +897,8 @@ class PeerSession:
         if st is None:
             raise ProtocolError("DATA unknown Stream")
         end = offset + len(data)
+        if st.recv_final is not None and end > st.recv_final:
+            raise FinalSizeError("DATA beyond established final size")
         if end > st.local_maximum:
             raise FlowControlError("Stream credit")
         old = st.recv_committed

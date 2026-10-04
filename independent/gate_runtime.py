@@ -73,11 +73,20 @@ from .core import (
 )
 
 ERROR_NO_ERROR = 0x00
+ERROR_PROTOCOL_VIOLATION = 0x02
+ERROR_AUTHENTICATION_FAILED = 0x03
 ERROR_RESOURCE_LIMIT = 0x05
 ERROR_SESSION_CONFLICT = 0x07
+ERROR_STREAM_LIMIT = 0x08
 ERROR_FLOW_CONTROL = 0x09
+ERROR_FRAME_ENCODING = 0x0A
 ERROR_CARRIER_CONFLICT = 0x0C
+ERROR_STREAM_STATE = 0x0E
+ERROR_FINAL_SIZE = 0x0F
 ERROR_TRANSMISSION_ID = 0x10
+
+STREAM_CREDIT_WINDOW_LIMIT = 16 * 1024 * 1024
+SESSION_CREDIT_WINDOW_LIMIT = 128 * 1024 * 1024
 
 STREAM_REASON_TEST = 0x09
 
@@ -101,6 +110,29 @@ class CandidateReject(RuntimeError):
     def __init__(self, error_code: int, message: str) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+class StreamStateError(ProtocolError):
+    pass
+
+
+@dataclass
+class CreditPair:
+    consumed: int = 0
+    maximum: int = 0
+
+    def accept(self, consumed: int, maximum: int, window_limit: int, label: str) -> str:
+        if maximum < consumed:
+            raise FlowControlError(f"invalid {label} credit")
+        if maximum - consumed > window_limit:
+            raise FlowControlError(f"{label} credit window exceeds Draft 11 limit")
+        if consumed >= self.consumed and maximum >= self.maximum:
+            self.consumed = consumed
+            self.maximum = maximum
+            return "newer"
+        if consumed <= self.consumed and maximum <= self.maximum:
+            return "stale"
+        raise FlowControlError(f"crossed {label} credit pair")
 
 
 def transport_key_from_env() -> bytes:
@@ -149,7 +181,7 @@ class TxState:
 class StreamState:
     stream_id: int
     local_maximum: int = 1024 * 1024
-    peer_maximum: int = 0
+    peer_credit: CreditPair = field(default_factory=CreditPair)
     recv_committed: int = 0
     recv_next: int = 0
     recv_final: Optional[int] = None
@@ -158,6 +190,7 @@ class StreamState:
     terminal_mode: str = "ACTIVE"
     stream_error_code: Optional[int] = None
     recv_segments: Dict[int, bytes] = field(default_factory=dict)
+    accepted_chunks: Dict[int, bytes] = field(default_factory=dict)
     recv_data: bytearray = field(default_factory=bytearray)
     open_event: asyncio.Event = field(default_factory=asyncio.Event)
     credit_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -209,7 +242,7 @@ class IndependentSession:
         self.peer_retired_through = 0
 
         self.session_local_maximum = 8 * 1024 * 1024
-        self.session_peer_maximum = 0
+        self.session_peer_credit = CreditPair()
         self.session_recv_committed = 0
         self.session_send_committed = 0
         self.session_credit_event = asyncio.Event()
@@ -254,6 +287,8 @@ class IndependentSession:
         )
 
     def validate_server_candidate(self, init) -> None:
+        if self.state in {"CLOSING", "CLOSED"}:
+            raise CandidateReject(ERROR_SESSION_CONFLICT, "Session is closing; no new candidate is admissible")
         if init.session_action == 0:
             if self.session_id is not None:
                 raise CandidateReject(ERROR_SESSION_CONFLICT, "CREATE collided with retained Session")
@@ -614,38 +649,82 @@ class IndependentSession:
     async def receive_loop(self, carrier: Carrier) -> None:
         try:
             while self.state not in {"CLOSING", "CLOSED"}:
-                frames = await carrier.recv_record()
+                try:
+                    frames = await carrier.recv_record()
+                except AuthenticationError as exc:
+                    await self._terminate_carrier(carrier, ERROR_AUTHENTICATION_FAILED, str(exc), False)
+                    return
+                except ProtocolError as exc:
+                    await self._terminate_carrier(carrier, ERROR_FRAME_ENCODING, str(exc), True)
+                    return
+
+                if self.state in {"CLOSING", "CLOSED"}:
+                    return
                 for frame_type, fields in frames:
-                    await self.handle_frame(carrier, frame_type, fields)
+                    if self.state in {"CLOSING", "CLOSED"}:
+                        return
+                    try:
+                        await self.handle_frame(carrier, frame_type, fields)
+                    except Exception as exc:
+                        handled = await self._handle_decoded_frame_failure(carrier, frame_type, exc)
+                        if not handled:
+                            raise
                     if self.state in {"CLOSING", "CLOSED"}:
                         return
         except asyncio.IncompleteReadError:
             await self.on_carrier_lost(carrier, "transport-eof")
         except (ConnectionError, BrokenPipeError):
             await self.on_carrier_lost(carrier, "transport-error")
-        except TransmissionError as exc:
-            await self.fail_session(
-                ERROR_TRANSMISSION_ID,
-                FRAME_TRANSMISSION_ACK,
-                f"TRANSMISSION_ID_ERROR: {exc}",
-                carrier,
-            )
-        except FlowControlError as exc:
-            await self.fail_session(
-                ERROR_FLOW_CONTROL,
-                FRAME_STREAM_DATA,
-                f"FLOW_CONTROL_ERROR: {exc}",
-                carrier,
-            )
-        except (ProtocolError, FinalSizeError, AuthenticationError) as exc:
-            self.fatal_error = f"{type(exc).__name__}: {exc}"
-            self.trace.emit(
-                "runtime_error",
-                **carrier.base_trace(),
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-            self.done_event.set()
+
+    async def _handle_decoded_frame_failure(
+        self,
+        carrier: Carrier,
+        frame_type: int,
+        exc: Exception,
+    ) -> bool:
+        mapping = (
+            (TransmissionError, ERROR_TRANSMISSION_ID, "TRANSMISSION_ID_ERROR"),
+            (FlowControlError, ERROR_FLOW_CONTROL, "FLOW_CONTROL_ERROR"),
+            (FinalSizeError, ERROR_FINAL_SIZE, "FINAL_SIZE_ERROR"),
+            (StreamStateError, ERROR_STREAM_STATE, "STREAM_STATE_ERROR"),
+            (ProtocolError, ERROR_PROTOCOL_VIOLATION, "PROTOCOL_VIOLATION"),
+        )
+        for cls, code, label in mapping:
+            if isinstance(exc, cls):
+                await self.fail_session(code, frame_type, f"{label}: {exc}", carrier)
+                return True
+        return False
+
+    async def _terminate_carrier(
+        self,
+        carrier: Carrier,
+        error_code: int,
+        reason: str,
+        report: bool,
+    ) -> None:
+        active = self.carriers.get(carrier.carrier_id)
+        if active is None or active.generation != carrier.generation:
+            return
+        if report:
+            try:
+                await self.send_frame(
+                    carrier,
+                    FRAME_CARRIER_CLOSE,
+                    error_code=error_code,
+                    trigger_frame_type=0,
+                    reason=reason[:256],
+                )
+            except Exception:
+                pass
+        self.trace.emit(
+            "carrier_failed",
+            **carrier.base_trace(),
+            error_code=error_code,
+            trigger_frame_type=0,
+            reason=reason,
+        )
+        await self._close_writer(carrier)
+        await self.on_carrier_lost(carrier, reason)
 
     async def fail_session(
         self,
@@ -708,9 +787,17 @@ class IndependentSession:
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"])
             maximum = int(fields["maximum_bytes"])
-            if maximum < consumed:
-                raise FlowControlError("invalid Session credit")
-            self.session_peer_maximum = max(self.session_peer_maximum, maximum)
+            result = self.session_peer_credit.accept(
+                consumed, maximum, SESSION_CREDIT_WINDOW_LIMIT, "Session"
+            )
+            self.trace.emit(
+                "credit_merge",
+                session_id=self.session_id.hex() if self.session_id else None,
+                scope="session",
+                consumed=consumed,
+                maximum=maximum,
+                result=result,
+            )
             self.session_credit_event.set()
             return
 
@@ -718,12 +805,21 @@ class IndependentSession:
             stream_id = int(fields["stream_id"])
             stream = self.streams.get(stream_id)
             if stream is None:
-                raise ProtocolError("Stream credit for unknown Stream")
+                raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
             maximum = int(fields["maximum_offset"])
-            if maximum < consumed:
-                raise FlowControlError("invalid Stream credit")
-            stream.peer_maximum = max(stream.peer_maximum, maximum)
+            result = stream.peer_credit.accept(
+                consumed, maximum, STREAM_CREDIT_WINDOW_LIMIT, "Stream"
+            )
+            self.trace.emit(
+                "credit_merge",
+                session_id=self.session_id.hex() if self.session_id else None,
+                scope="stream",
+                stream_id=stream_id,
+                consumed=consumed,
+                maximum=maximum,
+                result=result,
+            )
             stream.credit_event.set()
             return
 
@@ -853,10 +949,30 @@ class IndependentSession:
         raise ProtocolError(f"Gate 2 runtime does not handle {FRAME_NAMES.get(frame_type, frame_type)}")
 
     async def handle_stream_open(self, incoming: Carrier, fields: Dict[str, object]) -> None:
+        if self.role != "server":
+            raise StreamStateError("Draft 11 Core does not permit a server-initiated Stream")
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
+        if stream_id <= 0 or (stream_id & 1) == 0:
+            raise StreamStateError("peer used an invalid client Stream ID")
         duplicate = self.register_peer_tx(FRAME_STREAM_OPEN, fields)
         stream = self.streams.get(stream_id)
+        if stream is not None and not duplicate:
+            raise TransmissionError("new STREAM_OPEN Transmission conflicts with existing Stream identity")
+        if stream is None and len(self.streams) >= self.local_limits.max_streams:
+            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            await self.send_frame(
+                reply,
+                FRAME_STREAM_OPEN_REJECT,
+                stream_id=stream_id,
+                transmission_id=txid,
+                error_code=ERROR_STREAM_LIMIT,
+            )
+            self.peer_tx_confirmation[txid] = (
+                FRAME_STREAM_OPEN_REJECT,
+                {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_LIMIT},
+            )
+            return
         if stream is None:
             stream = StreamState(stream_id=stream_id)
             self.streams[stream_id] = stream
@@ -885,37 +1001,68 @@ class IndependentSession:
             {"stream_id": stream_id, "transmission_id": txid},
         )
 
+    def ensure_byte_identity(self, stream: StreamState, offset: int, data: bytes) -> None:
+        new_start = offset
+        new_end = offset + len(data)
+        for accepted_start, accepted in stream.accepted_chunks.items():
+            accepted_end = accepted_start + len(accepted)
+            left = new_start if new_start > accepted_start else accepted_start
+            right = new_end if new_end < accepted_end else accepted_end
+            if left >= right:
+                continue
+            if data[left - new_start : right - new_start] != accepted[left - accepted_start : right - accepted_start]:
+                raise ProtocolError("overlapping DATA changed Stream byte identity")
+
     async def handle_stream_data(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         offset = int(fields["offset"])
         txid = int(fields["transmission_id"])
         data = bytes(fields["data"])  # type: ignore[arg-type]
-        duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
         stream = self.streams.get(stream_id)
         if stream is None:
-            raise ProtocolError("DATA for unknown Stream")
+            raise StreamStateError("DATA for unknown Stream")
         end = offset + len(data)
+        if stream.recv_final is not None and end > stream.recv_final:
+            raise FinalSizeError("DATA exceeds established Final Offset")
         if end > stream.local_maximum:
             raise FlowControlError("Stream credit exceeded")
 
-        if not duplicate:
-            old_committed = stream.recv_committed
-            stream.recv_committed = max(stream.recv_committed, end)
-            delta = stream.recv_committed - old_committed
-            if self.session_recv_committed + delta > self.session_local_maximum:
-                raise FlowControlError("Session credit exceeded")
-            self.session_recv_committed += delta
-            existing = stream.recv_segments.get(offset)
-            if existing is not None and existing != data:
-                raise TransmissionError("conflicting Stream bytes")
-            stream.recv_segments[offset] = data
-            while stream.recv_next in stream.recv_segments:
-                chunk = stream.recv_segments.pop(stream.recv_next)
-                stream.recv_data.extend(chunk)
-                stream.recv_next += len(chunk)
-                self.application_rx_bytes += len(chunk)
-        else:
+        duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
+        if duplicate:
             self.application_duplicate_bytes_suppressed += len(data)
+        else:
+            self.ensure_byte_identity(stream, offset, data)
+            stream.accepted_chunks[offset] = data
+            committed_before = stream.recv_committed
+            committed_after = max(committed_before, end)
+            added_commitment = committed_after - committed_before
+            if self.session_recv_committed + added_commitment > self.session_local_maximum:
+                raise FlowControlError("Session credit exceeded")
+            self.session_recv_committed += added_commitment
+            stream.recv_committed = committed_after
+
+            if stream.terminal_mode == "RESET":
+                self.application_duplicate_bytes_suppressed += len(data)
+                self.trace.emit(
+                    "application_delivery_suppressed",
+                    session_id=self.session_id.hex() if self.session_id else None,
+                    stream_id=stream_id,
+                    transmission_id=txid,
+                    reason="RESET authoritative",
+                    data_length=len(data),
+                )
+            else:
+                previous = stream.recv_segments.get(offset)
+                if previous is not None and previous != data:
+                    raise TransmissionError("conflicting Stream bytes")
+                stream.recv_segments[offset] = data
+                cursor = stream.recv_next
+                while cursor in stream.recv_segments:
+                    chunk = stream.recv_segments.pop(cursor)
+                    stream.recv_data.extend(chunk)
+                    cursor += len(chunk)
+                    self.application_rx_bytes += len(chunk)
+                stream.recv_next = cursor
 
         if self.should_suppress_confirmation(FRAME_STREAM_DATA, fields, incoming):
             return
@@ -928,6 +1075,32 @@ class IndependentSession:
             receiver_timestamp_us=reply.timestamp_us(),
         )
 
+    def apply_terminal_receive(
+        self,
+        stream: StreamState,
+        final_offset: int,
+        duplicate: bool,
+        terminal_kind: str,
+    ) -> None:
+        if stream.recv_final is not None and stream.recv_final != final_offset:
+            raise FinalSizeError(f"{terminal_kind} contradicts established final size")
+        if final_offset < stream.recv_committed:
+            raise FinalSizeError(f"{terminal_kind} Final Offset below commitment")
+        if final_offset > stream.local_maximum:
+            raise FlowControlError(f"{terminal_kind} exceeds Stream credit")
+        added = max(0, final_offset - stream.recv_committed)
+        if self.session_recv_committed + added > self.session_local_maximum:
+            raise FlowControlError(f"{terminal_kind} exceeds Session credit")
+        if not duplicate:
+            self.session_recv_committed += added
+            stream.recv_committed = max(stream.recv_committed, final_offset)
+        if stream.recv_final is None:
+            stream.recv_final = final_offset
+        if terminal_kind == "RESET":
+            stream.terminal_mode = "RESET"
+        elif not duplicate and stream.terminal_mode != "RESET":
+            stream.terminal_mode = "FIN"
+
     async def handle_stream_fin(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
@@ -936,21 +1109,7 @@ class IndependentSession:
         stream = self.streams.get(stream_id)
         if stream is None:
             raise ProtocolError("FIN for unknown Stream")
-        if final_offset < stream.recv_committed:
-            raise FinalSizeError("Final Offset below commitment")
-        if stream.recv_final is not None and stream.recv_final != final_offset:
-            raise FinalSizeError("contradictory Final Offset")
-        if final_offset > stream.local_maximum:
-            raise FlowControlError("FIN exceeds Stream credit")
-        delta = max(0, final_offset - stream.recv_committed)
-        if self.session_recv_committed + delta > self.session_local_maximum:
-            raise FlowControlError("FIN exceeds Session credit")
-        if not duplicate:
-            self.session_recv_committed += delta
-            stream.recv_committed = max(stream.recv_committed, final_offset)
-            stream.recv_final = final_offset
-            if stream.terminal_mode != "RESET":
-                stream.terminal_mode = "FIN"
+        self.apply_terminal_receive(stream, final_offset, duplicate, "FIN")
 
         suppress = self.should_suppress_confirmation(FRAME_STREAM_FIN, fields, incoming)
         if (
@@ -991,20 +1150,7 @@ class IndependentSession:
         stream = self.streams.get(stream_id)
         if stream is None:
             raise ProtocolError("RESET for unknown Stream")
-        if stream.recv_final is not None and stream.recv_final != final_offset:
-            raise FinalSizeError("RESET contradicts established final size")
-        if final_offset < stream.recv_committed:
-            raise FinalSizeError("RESET Final Offset below commitment")
-        if final_offset > stream.local_maximum:
-            raise FlowControlError("RESET exceeds Stream credit")
-        delta = max(0, final_offset - stream.recv_committed)
-        if self.session_recv_committed + delta > self.session_local_maximum:
-            raise FlowControlError("RESET exceeds Session credit")
-        if not duplicate:
-            self.session_recv_committed += delta
-            stream.recv_committed = max(stream.recv_committed, final_offset)
-        stream.recv_final = final_offset
-        stream.terminal_mode = "RESET"
+        self.apply_terminal_receive(stream, final_offset, duplicate, "RESET")
         stream.stream_error_code = int(fields["stream_error_code"])
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
         await self.send_frame(
@@ -1045,6 +1191,8 @@ class IndependentSession:
             stream.reset_sent_event.set()
 
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
+        if self.state != "ACTIVE":
+            raise RuntimeError("cannot create Stream outside ACTIVE Session state")
         stream = StreamState(stream_id=stream_id)
         self.streams[stream_id] = stream
         tx = self.alloc_tx(FRAME_STREAM_OPEN, stream_id)
@@ -1069,9 +1217,9 @@ class IndependentSession:
         data: bytes,
         carrier: Carrier,
     ) -> TxState:
-        if stream.send_offset + len(data) > stream.peer_maximum:
+        if stream.send_offset + len(data) > stream.peer_credit.maximum:
             raise FlowControlError("local sender lacks Stream credit")
-        if self.session_send_committed + len(data) > self.session_peer_maximum:
+        if self.session_send_committed + len(data) > self.session_peer_credit.maximum:
             raise FlowControlError("local sender lacks Session credit")
         tx = self.alloc_tx(
             FRAME_STREAM_DATA,
@@ -1210,6 +1358,8 @@ async def client_handshake(
     carrier_id: int,
     generation: int,
 ) -> Carrier:
+    if session.state in {"CLOSING", "CLOSED"}:
+        raise RuntimeError("closed/closing Session cannot originate another Carrier candidate")
     if session.session_id is None:
         raise RuntimeError("Client Session ID not initialized")
     session.highest_attempted[carrier_id] = max(
