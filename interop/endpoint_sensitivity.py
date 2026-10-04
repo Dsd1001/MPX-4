@@ -271,6 +271,47 @@ async def mutation_terminal_credit_final_check_bypassed(implementation: str) -> 
     }
 
 
+async def mutation_tombstone_credit_validation_bypassed(implementation: str) -> dict:
+    runtime = runtime_module(implementation)
+    cls = session_class(implementation)
+    original = cls.handle_frame
+
+    async def broken(self, incoming, frame_type, fields):
+        if frame_type == runtime.FRAME_STREAM_CREDIT:
+            stream_id = int(fields["stream_id"])
+            if stream_id not in self.streams and stream_id in self.tombstones:
+                return
+        return await original(self, incoming, frame_type, fields)
+
+    guards = (
+        "tombstone-credit-beyond-final",
+        "tombstone-credit-invalid-pair",
+        "tombstone-credit-window-exceeded",
+    )
+    observed = []
+    cls.handle_frame = broken
+    try:
+        for role in ("client", "server"):
+            for case_name in guards:
+                failure = await expect_case_failure(implementation, case_name, role=role)
+                violation = case_name.removeprefix("tombstone-credit-")
+                expected = (
+                    f"ProbeError: retained tombstone STREAM_CREDIT {violation} did not close Session; "
+                    "PING/PONG still succeeds"
+                )
+                if not failure.startswith(expected) or "all_local_tx_settled=True" not in failure:
+                    raise SensitivityError(f"tombstone mutation guard failed outside the credit check: {failure}")
+                observed.append({"role": role, "case": case_name, "failure": failure})
+    finally:
+        cls.handle_frame = original
+    return {
+        "mutation": "tombstone_credit_validation_bypassed",
+        "guard_case": guards[0],
+        "guard_cases": list(guards),
+        "observed_failures": observed,
+    }
+
+
 MUTATIONS: List[Callable[[str], Awaitable[dict]]] = [
     mutation_fail_session_noop,
     mutation_crossed_credit_accepted,
@@ -279,6 +320,7 @@ MUTATIONS: List[Callable[[str], Awaitable[dict]]] = [
     mutation_stop_sending_conflates_receive_direction,
     mutation_overlap_reassembly_exact_offset_only,
     mutation_terminal_credit_final_check_bypassed,
+    mutation_tombstone_credit_validation_bypassed,
 ]
 
 

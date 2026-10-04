@@ -965,7 +965,16 @@ class Gate2Session:
             stream_id = int(fields["stream_id"])
             stream = self.streams.get(stream_id)
             if stream is None:
-                if stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+                tombstone = self.tombstones.get(stream_id)
+                if tombstone is not None:
+                    consumed = int(fields["consumed_offset"])
+                    maximum = int(fields["maximum_offset"])
+                    send_final = tombstone.get("send_final")
+                    if send_final is not None and consumed > send_final:
+                        raise FinalSizeError("STREAM_CREDIT Consumed Offset exceeds tombstone local Final Offset")
+                    self.merge_credit_pair(0, 0, consumed, maximum, STREAM_CREDIT_WINDOW_LIMIT, "Stream")
+                    return
+                if stream_id in self.retired_stream_ids:
                     return
                 raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])

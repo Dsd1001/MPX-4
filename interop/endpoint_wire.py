@@ -1469,6 +1469,211 @@ async def case_terminal_credit_beyond_final(f: Fixture) -> dict:
     return {"send_final": stream.send_final, "close": close}
 
 
+async def prepare_credit_tombstone(f: Fixture) -> Tuple[Peer, object, dict]:
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    core = f.core
+    carrier = f.session.carriers[peer.carrier.carrier_id]
+    await peer.carrier.send_frame(
+        core.FRAME_SESSION_CREDIT, consumed_bytes=0, maximum_bytes=8 * 1024 * 1024,
+    )
+    await peer.carrier.send_frame(
+        core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=0, maximum_offset=1024 * 1024,
+    )
+    await f.ping(peer)
+
+    async def acknowledge_local(frame_type: int, txid: Optional[int] = None) -> dict:
+        fields = await peer.recv_until(frame_type)
+        if txid is not None:
+            check(int(fields["transmission_id"]) == txid, fields)
+        await peer.carrier.send_frame(
+            core.FRAME_TRANSMISSION_ACK,
+            stream_id=1,
+            transmission_id=int(fields["transmission_id"]),
+            receiver_timestamp_us=0,
+        )
+        return fields
+
+    async def peer_reliable(frame_type: int, **fields: object) -> int:
+        txid = f.next_peer_tx(peer.carrier.carrier_id)
+        await peer.carrier.send_frame(frame_type, stream_id=1, transmission_id=txid, **fields)
+        ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+        check(int(ack["transmission_id"]) == txid, ack)
+        return txid
+
+    data_tx = await f.session.send_data(stream, b"ABCD", carrier)
+    data = await acknowledge_local(core.FRAME_STREAM_DATA, data_tx.txid)
+    check(data["data"] == b"ABCD", data)
+    await peer_reliable(core.FRAME_STOP_SENDING, stream_error_code=0)
+    reset = await acknowledge_local(core.FRAME_RESET_STREAM)
+    check(int(reset["transmission_id"]) == stream.local_terminal_txid, reset)
+    check(int(reset["final_offset"]) == 4, reset)
+    peer_reset_tx = await peer_reliable(core.FRAME_RESET_STREAM, final_offset=0, stream_error_code=0)
+    consumed_tx = await f.session.send_stream_consumed(stream, carrier)
+    consumed = await acknowledge_local(core.FRAME_STREAM_CONSUMED, consumed_tx.txid)
+    check(int(consumed["final_offset"]) == 0, consumed)
+    await peer_reliable(core.FRAME_STREAM_CONSUMED, final_offset=4)
+    await f.ping(peer)
+
+    confirmations = {
+        txid: response for txid, response in f.session.peer_tx_confirmation.items()
+        if int(response[1].get("stream_id", 0)) == 1
+    }
+    peer_stream_txids = {
+        txid for txid, semantic in f.session.peer_tx_semantics.items()
+        if dict(semantic[1]).get("stream_id") == 1
+    }
+    check(peer_stream_txids <= set(confirmations), (peer_stream_txids, confirmations))
+    check(peer_reset_tx in confirmations, confirmations)
+    check(stream.send_final == 4 and stream.recv_final == 0, (stream.send_final, stream.recv_final))
+    check(stream.send_terminal_mode == stream.recv_terminal_mode == "RESET", "both directions RESET")
+    check(stream.local_terminal_settled and stream.local_consumed and stream.peer_final_consumed, "terminal confirmations")
+    check(all(tx.settled for tx in f.session.local_tx.values()), "all local reliable Tx settled")
+    check(stream.recv_committed == f.session.session_recv_committed == 0, "receive accounting released")
+    check(f.session.application_rx_bytes == 0, "no application receive data")
+    before = {
+        "stream_credit": f.stream_credit(1),
+        "session_credit": f.session_credit(),
+        "session_send_committed": f.session.session_send_committed,
+        "application_rx_bytes": f.session.application_rx_bytes,
+        "send_final": stream.send_final,
+        "recv_final": stream.recv_final,
+        "send_terminal_mode": stream.send_terminal_mode,
+        "recv_terminal_mode": stream.recv_terminal_mode,
+        "local_terminal_settled": stream.local_terminal_settled,
+        "local_consumed": stream.local_consumed,
+        "peer_final_consumed": stream.peer_final_consumed,
+        "recv_committed": stream.recv_committed,
+        "all_local_tx_settled": True,
+        "local_txids": sorted(f.session.local_tx),
+        "peer_stream_txids": sorted(peer_stream_txids),
+        "confirmation_txids": sorted(confirmations),
+        "peer_reset_tx": peer_reset_tx,
+    }
+    tombstone = f.session.retire_stream_to_tombstone(1)
+    check(tombstone["send_final"] == 4 and 1 not in f.session.streams, tombstone)
+    check(all(f.session.peer_tx_confirmation.get(txid) == response for txid, response in confirmations.items()), "Session retains confirmation replay")
+    before["tombstone"] = dict(tombstone)
+    return peer, stream, before
+
+
+def check_tombstone_credit_unchanged(f: Fixture, stream: object, before: dict, *, retired: bool = False) -> None:
+    check(1 not in f.session.streams, "late credit resurrected Stream")
+    if retired:
+        check(1 not in f.session.tombstones and 1 in f.session.retired_stream_ids, "identity remains retired")
+    else:
+        check(f.session.tombstones.get(1) == before["tombstone"], "late credit changed tombstone")
+    stream_credit = (
+        (stream.peer_consumed, stream.peer_maximum) if f.implementation == "reference"
+        else (stream.peer_credit.consumed, stream.peer_credit.maximum)
+    )
+    check(stream_credit == before["stream_credit"], "late credit expanded Stream authorization")
+    check(f.session_credit() == before["session_credit"], "late credit changed Session authorization")
+    check(f.session.session_send_committed == before["session_send_committed"], "late credit changed commitment")
+    check(f.session.session_recv_committed == before["recv_committed"], "late credit changed receive commitment")
+    check(f.session.application_rx_bytes == before["application_rx_bytes"], "late credit delivered application data")
+    check(f.session.state == "ACTIVE", f.session.state)
+
+
+async def tombstone_credit_positive(f: Fixture, *, maximum_above_final: bool) -> dict:
+    peer, stream, before = await prepare_credit_tombstone(f)
+    final = before["send_final"]
+    maximum = final + f.runtime.STREAM_CREDIT_WINDOW_LIMIT if maximum_above_final else final
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=final, maximum_offset=maximum,
+    )
+    await f.ping(peer)
+    check_tombstone_credit_unchanged(f, stream, before)
+    await peer.carrier.send_frame(
+        f.core.FRAME_RESET_STREAM,
+        stream_id=1,
+        transmission_id=before["peer_reset_tx"],
+        final_offset=0,
+        stream_error_code=0,
+    )
+    ack = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(ack["transmission_id"]) == before["peer_reset_tx"], ack)
+    await f.ping(peer)
+    check_tombstone_credit_unchanged(f, stream, before)
+    return {"preconditions": before, "consumed": final, "maximum": maximum, "confirmation_replayed": True}
+
+
+async def case_tombstone_credit_boundary(f: Fixture) -> dict:
+    return await tombstone_credit_positive(f, maximum_above_final=False)
+
+
+async def case_tombstone_credit_maximum_above_final(f: Fixture) -> dict:
+    return await tombstone_credit_positive(f, maximum_above_final=True)
+
+
+async def tombstone_credit_negative(f: Fixture, violation: str) -> dict:
+    peer, _, before = await prepare_credit_tombstone(f)
+    final = before["send_final"]
+    if violation == "beyond-final":
+        consumed, maximum, error = final + 1, before["stream_credit"][1] + 8, ERROR_FINAL_SIZE
+    elif violation == "invalid-pair":
+        consumed, maximum, error = final, final - 1, ERROR_FLOW_CONTROL
+    else:
+        consumed, maximum, error = final, final + f.runtime.STREAM_CREDIT_WINDOW_LIMIT + 1, ERROR_FLOW_CONTROL
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=consumed, maximum_offset=maximum,
+    )
+    try:
+        close = await f.expect_session_close(peer, error, f.core.FRAME_STREAM_CREDIT)
+    except asyncio.TimeoutError as exc:
+        await f.ping(peer)
+        raise ProbeError(
+            f"retained tombstone STREAM_CREDIT {violation} did not close Session; "
+            f"PING/PONG still succeeds (state={f.session.state}, send_final={final}, "
+            f"all_local_tx_settled={before['all_local_tx_settled']}, "
+            f"confirmation_txids={before['confirmation_txids']})"
+        ) from exc
+    return {"preconditions": before, "consumed": consumed, "maximum": maximum, "close": close}
+
+
+async def case_tombstone_credit_beyond_final(f: Fixture) -> dict:
+    return await tombstone_credit_negative(f, "beyond-final")
+
+
+async def case_tombstone_credit_invalid_pair(f: Fixture) -> dict:
+    return await tombstone_credit_negative(f, "invalid-pair")
+
+
+async def case_tombstone_credit_window_exceeded(f: Fixture) -> dict:
+    return await tombstone_credit_negative(f, "window-exceeded")
+
+
+async def case_retired_credit_ignored(f: Fixture) -> dict:
+    peer, stream, before = await prepare_credit_tombstone(f)
+    retired_through = max(before["confirmation_txids"])
+    await peer.carrier.send_frame(f.core.FRAME_TRANSMISSION_RETIRE, retired_through=retired_through)
+    await f.ping(peer)
+    check(f.session.peer_retired_through == retired_through, f.session.peer_retired_through)
+    check(not set(before["confirmation_txids"]) & set(f.session.peer_tx_confirmation), "retired confirmations released")
+    check(all(tx.settled for tx in f.session.local_tx.values()), "all local reliable Tx settled before compaction")
+    f.session.compact_tombstone(1)
+    for consumed, maximum in (
+        (5, before["stream_credit"][1] + 8),
+        (4, 3),
+        (4, 4 + f.runtime.STREAM_CREDIT_WINDOW_LIMIT + 1),
+    ):
+        await peer.carrier.send_frame(
+            f.core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=consumed, maximum_offset=maximum,
+        )
+        await f.ping(peer)
+        check_tombstone_credit_unchanged(f, stream, before, retired=True)
+    return {"preconditions": before, "retired_through": retired_through, "ignored_credit_pairs": 3}
+
+
+async def case_unknown_stream_credit(f: Fixture) -> dict:
+    peer = await f.establish()
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_CREDIT, stream_id=99, consumed_offset=0, maximum_offset=1,
+    )
+    close = await f.expect_session_close(peer, ERROR_STREAM_STATE, f.core.FRAME_STREAM_CREDIT)
+    return {"close": close}
+
+
 CASES = {
     "normal-data": case_normal_data,
     "fin-fill-hole": case_fin_fill_hole,
@@ -1501,6 +1706,13 @@ CASES = {
     "same-offset-extension": case_same_offset_extension,
     "terminal-credit-boundary": case_terminal_credit_boundary,
     "terminal-credit-beyond-final": case_terminal_credit_beyond_final,
+    "tombstone-credit-boundary": case_tombstone_credit_boundary,
+    "tombstone-credit-maximum-above-final": case_tombstone_credit_maximum_above_final,
+    "tombstone-credit-beyond-final": case_tombstone_credit_beyond_final,
+    "tombstone-credit-invalid-pair": case_tombstone_credit_invalid_pair,
+    "tombstone-credit-window-exceeded": case_tombstone_credit_window_exceeded,
+    "retired-credit-ignored": case_retired_credit_ignored,
+    "unknown-stream-credit": case_unknown_stream_credit,
 }
 
 

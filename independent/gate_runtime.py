@@ -924,7 +924,16 @@ class IndependentSession:
             stream_id = int(fields["stream_id"])
             stream = self.streams.get(stream_id)
             if stream is None:
-                if stream_id in self.tombstones or stream_id in self.retired_stream_ids:
+                retained = self.tombstones.get(stream_id)
+                if retained is not None:
+                    consumed = int(fields["consumed_offset"])
+                    maximum = int(fields["maximum_offset"])
+                    final_offset = retained.get("send_final")
+                    if final_offset is not None and consumed > final_offset:
+                        raise FinalSizeError("tombstone STREAM_CREDIT exceeds recorded local final size")
+                    CreditPair().accept(consumed, maximum, STREAM_CREDIT_WINDOW_LIMIT, "Stream")
+                    return
+                if stream_id in self.retired_stream_ids:
                     return
                 raise StreamStateError("Stream credit for unknown Stream")
             consumed = int(fields["consumed_offset"])
