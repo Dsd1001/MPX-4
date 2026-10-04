@@ -861,6 +861,7 @@ class IndependentSession:
             "terminal_mode": stream.terminal_mode,
             "recv_terminal_mode": stream.recv_terminal_mode,
             "send_terminal_mode": stream.send_terminal_mode,
+            "stream_error_code": stream.stream_error_code,
             "opening_txid": stream.opening_txid,
             "opening_decision": "accepted" if stream.accepted else None,
         }
@@ -939,12 +940,70 @@ class IndependentSession:
         if txid <= self.peer_retired_through:
             return True
         remembered = self.peer_tx_semantics.get(txid)
-        if remembered is None:
+        if remembered is not None:
+            if remembered != self.peer_semantic(frame_type, fields):
+                raise TransmissionError(f"retired peer Transmission {txid} changed semantics")
+            if not await self.resend_confirmation(incoming, txid):
+                raise TransmissionError(f"retired peer Transmission {txid} lost confirmation replay")
+            return True
+
+        snapshot = self.retired_stream_info.get(stream_id)
+        if snapshot is None:
             return False
-        if remembered != self.peer_semantic(frame_type, fields):
-            raise TransmissionError(f"retired peer Transmission {txid} changed semantics")
-        if not await self.resend_confirmation(incoming, txid):
-            raise TransmissionError(f"retired peer Transmission {txid} lost confirmation replay")
+        opening_decision = snapshot.get("opening_decision", snapshot.get("decision"))
+        if opening_decision != "accepted":
+            return False
+
+        if frame_type == FRAME_STREAM_FIN:
+            final_offset = int(fields["final_offset"])
+            recorded = snapshot.get("recv_final")
+            if recorded is None:
+                raise StreamStateError("retired Stream has no receive Final Offset")
+            if int(recorded) != final_offset:
+                raise FinalSizeError("late FIN changes retired final size")
+        elif frame_type == FRAME_RESET_STREAM:
+            final_offset = int(fields["final_offset"])
+            recorded = snapshot.get("recv_final")
+            if recorded is None:
+                raise StreamStateError("retired Stream has no receive Final Offset")
+            if int(recorded) != final_offset:
+                raise FinalSizeError("late RESET changes retired final size")
+            error_code = int(fields["stream_error_code"])
+            if snapshot.get("recv_terminal_mode") == "RESET":
+                old_error = snapshot.get("stream_error_code")
+                if old_error is not None and int(old_error) != error_code:
+                    raise StreamStateError("late RESET changes retired Stream Error Code")
+            else:
+                snapshot["recv_terminal_mode"] = "RESET"
+                snapshot["terminal_mode"] = "RESET"
+                snapshot["stream_error_code"] = error_code
+        elif frame_type == FRAME_STREAM_DATA:
+            recorded = snapshot.get("recv_final")
+            if recorded is None:
+                raise StreamStateError("retired Stream has no receive Final Offset")
+            data = bytes(fields["data"])
+            if int(fields["offset"]) + len(data) > int(recorded):
+                raise FinalSizeError("late DATA extends beyond retired final size")
+            self.application_duplicate_bytes_suppressed += len(data)
+        elif frame_type == FRAME_STOP_SENDING:
+            if snapshot.get("send_final") is None or snapshot.get("send_terminal_mode") not in {"FIN", "RESET"}:
+                raise StreamStateError("STOP_SENDING cannot target an unterminated retired send direction")
+        elif frame_type == FRAME_STREAM_CONSUMED:
+            recorded = snapshot.get("send_final")
+            if recorded is None or int(recorded) != int(fields["final_offset"]):
+                raise FinalSizeError("late STREAM_CONSUMED changes retired local final size")
+        else:
+            return False
+
+        self.register_peer_tx(frame_type, fields)
+        await self.acknowledge(incoming, stream_id, txid, frame_type)
+        self.trace.emit(
+            "retired_confirmation_recovered",
+            session_id=self.session_id.hex() if self.session_id else None,
+            stream_id=stream_id,
+            transmission_id=txid,
+            frame_type=FRAME_NAMES.get(frame_type, frame_type),
+        )
         return True
 
     async def send_stream_consumed(self, stream: StreamState, carrier: Carrier) -> TxState:
@@ -1259,9 +1318,9 @@ class IndependentSession:
             cancelled_or_rejected["opening_decision"] = "cancelled" if decision.startswith("preopen") else decision
             cancelled_or_rejected["error_code"] = code
             response = {"stream_id": stream_id, "transmission_id": txid, "error_code": code}
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
             target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
             await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
-            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
             return
 
         terminal = self.tombstones.get(stream_id)
@@ -1277,8 +1336,8 @@ class IndependentSession:
                     return
                 target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
                 response = {"stream_id": stream_id, "transmission_id": txid}
-                await self.send_frame(target, FRAME_STREAM_OPEN_OK, **response)
                 self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_OK, response)
+                await self.send_frame(target, FRAME_STREAM_OPEN_OK, **response)
                 return
 
         if stream_id in self.retired_stream_ids:
@@ -1287,8 +1346,8 @@ class IndependentSession:
             self.register_peer_tx(FRAME_STREAM_OPEN, fields)
             target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
             response = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_STATE}
-            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
             self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
+            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
             return
 
         stream = self.streams.get(stream_id)
@@ -1302,14 +1361,14 @@ class IndependentSession:
         if stream is None and len(self.streams) >= self.local_limits.max_streams:
             target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
             response = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_LIMIT}
-            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
-            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
             self.opening_tombstones[stream_id] = {
                 "opening_txid": txid,
                 "decision": "rejected",
                 "opening_decision": "rejected",
                 "error_code": ERROR_STREAM_LIMIT,
             }
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
+            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
             return
         if stream is None:
             stream = StreamState(stream_id=stream_id, lifecycle="OPEN", accepted=True)
@@ -1322,6 +1381,7 @@ class IndependentSession:
             )
         target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
         response = {"stream_id": stream_id, "transmission_id": txid}
+        self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_OK, response)
         await self.send_frame(target, FRAME_STREAM_OPEN_OK, **response)
         await self.send_frame(
             target,
@@ -1331,7 +1391,6 @@ class IndependentSession:
             maximum_offset=stream.local_maximum,
         )
         self.stream_credit_refreshes += 1
-        self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_OK, response)
 
     def ensure_byte_identity(self, stream: StreamState, offset: int, data: bytes) -> None:
         new_start = offset

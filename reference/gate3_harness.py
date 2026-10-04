@@ -122,10 +122,20 @@ ENDPOINT_WIRE_CASES = {
     "H5": ("acceptance-wins-cancel",),
     "I1": ("tombstone-terminal-duplicate",),
     "I2": ("tombstone-conflicting-final", "tombstone-credit-beyond-final", "tombstone-credit-invalid-pair", "tombstone-credit-window-exceeded"),
-    "I3": ("retired-stale-no-recreate", "retired-credit-ignored", "retired-fin-confirmation-replay"),
-    "I4": ("stream-id-reuse", "capacity-reject-replay", "accepted-open-replay-tombstone", "accepted-open-ok-replay-tombstone"),
+    "I3": (
+        "retired-stale-no-recreate", "retired-credit-ignored", "retired-fin-confirmation-replay",
+        "retired-delayed-fin-recovery", "retired-first-late-controls", "retired-first-late-data",
+        "retired-first-late-final-conflict", "retired-first-late-tx-conflict",
+    ),
+    "I4": (
+        "stream-id-reuse", "capacity-reject-replay", "cross-carrier-reject-atomicity",
+        "accepted-open-replay-tombstone", "accepted-open-ok-replay-tombstone",
+    ),
     "I5": ("tombstone-not-active-limit",),
-    "I6": ("terminal-confirmation-replay", "retired-fin-confirmation-replay"),
+    "I6": (
+        "terminal-confirmation-replay", "retired-fin-confirmation-replay",
+        "retired-delayed-fin-recovery", "retired-first-late-controls", "retired-first-late-data",
+    ),
     "J5": ("failed-candidate-nonmutating",),
     "J6": ("stale-generation",),
     "J7": ("candidate-conflict",),
@@ -167,7 +177,7 @@ ENDPOINT_WIRE_CASES = {
 SERVER_ONLY_ENDPOINT_CASES = {
     "stream-limit", "invalid-stream-parity", "candidate-conflict", "create-collision",
     "invalid-preopen-stop-id", "valid-preopen-stop-unseen",
-    "capacity-reject-replay", "accepted-open-replay-tombstone",
+    "capacity-reject-replay", "cross-carrier-reject-atomicity", "accepted-open-replay-tombstone",
 }
 
 CLIENT_ONLY_ENDPOINT_CASES = {

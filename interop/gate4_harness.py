@@ -254,7 +254,7 @@ def execute(out_dir: Path) -> dict:
     ])
     endpoint_wire = read(endpoint_wire_dir / "endpoint-wire-report.json")
     check(endpoint_wire.get("status") == "PASS", "aggregate endpoint-wire suite failed")
-    check(endpoint_wire.get("execution_count") == 178, "expected 178 baseline authenticated endpoint-wire executions")
+    check(endpoint_wire.get("execution_count") == 200, "expected 200 baseline authenticated endpoint-wire executions")
     run([
         sys.executable,
         "-m",
@@ -275,7 +275,11 @@ def execute(out_dir: Path) -> dict:
     ])
     sensitivity = read(sensitivity_dir / "endpoint-sensitivity-report.json")
     check(sensitivity.get("status") == "PASS", "endpoint sensitivity suite failed")
-    check(sensitivity.get("control_count") == 32, "expected thirty-two deliberate-defect sensitivity controls")
+    check(sensitivity.get("baseline_status") == "PASS", "endpoint sensitivity baseline controls failed")
+    check(sensitivity.get("baseline_control_count") == 52, "expected 52 unmutated sensitivity baselines")
+    check(sensitivity.get("negative_control_status") == "PASS", "endpoint sensitivity oracle negative controls failed")
+    check(sensitivity.get("negative_control_count") == 2, "expected two sensitivity oracle negative controls")
+    check(sensitivity.get("control_count") == 36, "expected thirty-six deliberate-defect sensitivity controls")
 
     basic = []
     faults = []
@@ -314,6 +318,10 @@ def execute(out_dir: Path) -> dict:
         "endpoint_coverage_sensitivity": {
             "status": sensitivity["status"],
             "control_count": sensitivity["control_count"],
+            "baseline_status": sensitivity["baseline_status"],
+            "baseline_control_count": sensitivity["baseline_control_count"],
+            "negative_control_status": sensitivity["negative_control_status"],
+            "negative_control_count": sensitivity["negative_control_count"],
         },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
@@ -332,8 +340,9 @@ def execute(out_dir: Path) -> dict:
         },
         "claim": (
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
-            "178 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and thirty-two deliberate-defect "
-            "sensitivity controls pass; A/B real-TCP role reversal passes the basic and five fault profiles in direct and fragmented modes."
+            "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and thirty-six target-witnessed "
+            "sensitivity mutations pass after 52 unmutated baselines and two oracle negative controls; A/B real-TCP role reversal passes the "
+            "basic and five fault profiles in direct and fragmented modes."
         ),
         "claim_boundary": (
             "No Mandatory case is model-only, but not every Mandatory case is classified endpoint-wire: codec and cross-wire evidence remain "

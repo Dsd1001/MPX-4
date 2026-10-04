@@ -1674,7 +1674,7 @@ async def case_unknown_stream_credit(f: Fixture) -> dict:
     return {"close": close}
 
 
-async def terminalize_open_stream_zero(f: Fixture, peer: Peer, stream: object) -> dict:
+async def settle_open_stream_zero(f: Fixture, peer: Peer, stream: object) -> dict:
     core = f.core
     carrier = f.session.carriers[peer.carrier.carrier_id]
     cid = peer.carrier.carrier_id
@@ -1734,6 +1734,17 @@ async def terminalize_open_stream_zero(f: Fixture, peer: Peer, stream: object) -
     check(stream.send_terminal_mode == stream.recv_terminal_mode == "RESET", "zero-terminal RESET")
     check(stream.local_terminal_settled and stream.local_consumed and stream.peer_final_consumed, "zero-terminal settlement")
     check(all(tx.settled for tx in f.session.local_tx.values()), "local reliable state settled")
+    return {
+        "send_final": stream.send_final,
+        "recv_final": stream.recv_final,
+        "local_terminal_settled": stream.local_terminal_settled,
+        "local_consumed": stream.local_consumed,
+        "peer_final_consumed": stream.peer_final_consumed,
+    }
+
+
+async def terminalize_open_stream_zero(f: Fixture, peer: Peer, stream: object) -> dict:
+    await settle_open_stream_zero(f, peer, stream)
     tombstone = f.session.retire_stream_to_tombstone(1)
     check(1 not in f.session.streams and 1 in f.session.tombstones, f.session.tombstones)
     return dict(tombstone)
@@ -1974,6 +1985,375 @@ async def case_retired_fin_confirmation_replay(f: Fixture) -> dict:
     return {"preconditions": before, "txid": txid, "confirmation_replayed": True}
 
 
+async def case_cross_carrier_reject_atomicity(f: Fixture) -> dict:
+    check(f.endpoint_role == "server", "cross-carrier rejection atomicity targets server receiver")
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    await settle_open_stream_zero(f, peer, stream)
+    other = await f.establish(96)
+    txid = f.next_peer_tx(other.carrier.carrier_id)
+    release = asyncio.Event()
+    entered = asyncio.Event()
+    original_send = f.session.send_frame
+    delayed = False
+
+    async def paused_send(carrier, frame_type, **fields):
+        nonlocal delayed
+        await original_send(carrier, frame_type, **fields)
+        if (
+            frame_type == f.core.FRAME_STREAM_OPEN_REJECT
+            and int(fields.get("stream_id", -1)) == 3
+            and int(fields.get("transmission_id", -1)) == txid
+            and not delayed
+        ):
+            delayed = True
+            entered.set()
+            await release.wait()
+
+    f.session.send_frame = paused_send
+    try:
+        await other.carrier.send_frame(
+            f.core.FRAME_STREAM_OPEN,
+            stream_id=3,
+            transmission_id=txid,
+        )
+        first = await peer.recv_until(f.core.FRAME_STREAM_OPEN_REJECT)
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        retained = f.session.opening_tombstones.get(3)
+        check(retained is not None, "rejection decision was not committed before send await")
+        check(int(retained["error_code"]) == ERROR_STREAM_LIMIT, retained)
+        check(txid in f.session.peer_tx_confirmation, f.session.peer_tx_confirmation)
+
+        f.session.retire_stream_to_tombstone(1)
+        check(1 not in f.session.streams, f.session.streams)
+
+        await peer.carrier.send_frame(
+            f.core.FRAME_STREAM_OPEN,
+            stream_id=3,
+            transmission_id=txid,
+        )
+        second = await other.recv_until(f.core.FRAME_STREAM_OPEN_REJECT)
+        check(int(second["transmission_id"]) == txid, second)
+        check(int(second["error_code"]) == int(first["error_code"]) == ERROR_STREAM_LIMIT, (first, second))
+        check(3 not in f.session.streams, f.session.streams)
+        check(f.session.opening_tombstones[3]["opening_decision"] == "rejected", f.session.opening_tombstones[3])
+        release.set()
+        await f.ping(other, 0xC21B)
+        return {
+            "txid": txid,
+            "first_error": first["error_code"],
+            "second_error": second["error_code"],
+            "decision_committed_before_send_return": True,
+        }
+    finally:
+        release.set()
+        f.session.send_frame = original_send
+
+
+async def case_retired_delayed_fin_recovery(f: Fixture) -> dict:
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    core = f.core
+    carrier = f.session.carriers[peer.carrier.carrier_id]
+    await peer.carrier.send_frame(core.FRAME_SESSION_CREDIT, consumed_bytes=0, maximum_bytes=8 * 1024 * 1024)
+    await peer.carrier.send_frame(core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=0, maximum_offset=1024 * 1024)
+    await f.ping(peer, 0xC21C)
+
+    local_data_tx = await f.session.send_data(stream, b"ABCD", carrier)
+    local_data = await peer.recv_until(core.FRAME_STREAM_DATA)
+    check(int(local_data["transmission_id"]) == local_data_tx.txid, local_data)
+    await peer.carrier.send_frame(
+        core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=local_data_tx.txid,
+        receiver_timestamp_us=0,
+    )
+    await f.ping(peer, 0xC21D)
+
+    other = await f.establish(96)
+    pending_fin_tx = f.next_peer_tx(peer.carrier.carrier_id)
+    release = asyncio.Event()
+    entered = asyncio.Event()
+    original_handle = f.session.handle_frame
+
+    async def delayed_handle(incoming, frame_type, fields):
+        if frame_type == core.FRAME_STREAM_FIN and int(fields.get("transmission_id", -1)) == pending_fin_tx:
+            entered.set()
+            await release.wait()
+        return await original_handle(incoming, frame_type, fields)
+
+    async def peer_reliable(frame_type: int, **fields: object) -> int:
+        txid = f.next_peer_tx(other.carrier.carrier_id)
+        await other.carrier.send_frame(frame_type, stream_id=1, transmission_id=txid, **fields)
+        ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+        check(int(ack["transmission_id"]) == txid, ack)
+        return txid
+
+    f.session.handle_frame = delayed_handle
+    try:
+        await peer.carrier.send_frame(
+            core.FRAME_STREAM_FIN,
+            stream_id=1,
+            transmission_id=pending_fin_tx,
+            final_offset=0,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+
+        await peer_reliable(core.FRAME_STOP_SENDING, stream_error_code=0)
+        local_reset = await peer.recv_until(core.FRAME_RESET_STREAM)
+        check(int(local_reset["final_offset"]) == 4, local_reset)
+        await other.carrier.send_frame(
+            core.FRAME_TRANSMISSION_ACK,
+            stream_id=1,
+            transmission_id=int(local_reset["transmission_id"]),
+            receiver_timestamp_us=0,
+        )
+        later_reset_tx = await peer_reliable(core.FRAME_RESET_STREAM, final_offset=0, stream_error_code=0)
+
+        consumed_tx = await f.session.send_stream_consumed(stream, f.session.carriers[other.carrier.carrier_id])
+        consumed = await other.recv_until(core.FRAME_STREAM_CONSUMED)
+        check(int(consumed["transmission_id"]) == consumed_tx.txid and int(consumed["final_offset"]) == 0, consumed)
+        await other.carrier.send_frame(
+            core.FRAME_TRANSMISSION_ACK,
+            stream_id=1,
+            transmission_id=consumed_tx.txid,
+            receiver_timestamp_us=0,
+        )
+        await peer_reliable(core.FRAME_STREAM_CONSUMED, final_offset=4)
+        await f.ping(other, 0xC21E)
+
+        check(stream.send_final == 4 and stream.recv_final == 0, (stream.send_final, stream.recv_final))
+        check(stream.send_terminal_mode == stream.recv_terminal_mode == "RESET", "RESET remains authoritative")
+        check(stream.local_terminal_settled and stream.local_consumed and stream.peer_final_consumed, "retirement prerequisites")
+        check(all(tx.settled for tx in f.session.local_tx.values()), "local reliable state settled")
+        check(stream.recv_committed == f.session.session_recv_committed == 0, "receive commitment released")
+        check(pending_fin_tx not in f.session.peer_tx_semantics, f.session.peer_tx_semantics)
+
+        tombstone = f.session.retire_stream_to_tombstone(1)
+        f.session.compact_tombstone(1)
+        before_app = f.session.application_rx_bytes
+        before_send_commit = f.session.session_send_committed
+        before_recv_commit = f.session.session_recv_committed
+        release.set()
+
+        ack = await other.recv_until(core.FRAME_TRANSMISSION_ACK)
+        check(int(ack["transmission_id"]) == pending_fin_tx, ack)
+        await f.ping(other, 0xC21F)
+        retired = f.session.retired_stream_info[1]
+        check(retired["recv_terminal_mode"] == "RESET", retired)
+        check(1 not in f.session.streams and 1 in f.session.retired_stream_ids, f.session.retired_stream_ids)
+        check(f.session.application_rx_bytes == before_app, f.session.application_rx_bytes)
+        check(f.session.session_send_committed == before_send_commit, f.session.session_send_committed)
+        check(f.session.session_recv_committed == before_recv_commit, f.session.session_recv_committed)
+        return {
+            "pending_fin_tx": pending_fin_tx,
+            "later_reset_tx": later_reset_tx,
+            "tombstone": tombstone,
+            "recovered_first_arrival": True,
+            "reset_remains_authoritative": True,
+        }
+    finally:
+        release.set()
+        f.session.handle_frame = original_handle
+
+
+async def case_retired_first_late_controls(f: Fixture) -> dict:
+    peer, stream, before = await prepare_credit_tombstone(f)
+    f.session.compact_tombstone(1)
+    core = f.core
+    cid = peer.carrier.carrier_id
+    app_before = f.session.application_rx_bytes
+    send_commit_before = f.session.session_send_committed
+    recv_commit_before = f.session.session_recv_committed
+
+    reset_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_RESET_STREAM,
+        stream_id=1,
+        transmission_id=reset_tx,
+        final_offset=0,
+        stream_error_code=0,
+    )
+    reset_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(reset_ack["transmission_id"]) == reset_tx, reset_ack)
+
+    stop_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=stop_tx,
+        stream_error_code=7,
+    )
+    stop_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(stop_ack["transmission_id"]) == stop_tx, stop_ack)
+    await peer.expect_no(core.FRAME_RESET_STREAM, timeout=0.10)
+
+    consumed_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STREAM_CONSUMED,
+        stream_id=1,
+        transmission_id=consumed_tx,
+        final_offset=4,
+    )
+    consumed_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(consumed_ack["transmission_id"]) == consumed_tx, consumed_ack)
+
+    await f.ping(peer, 0xC220)
+    check(1 not in f.session.streams and 1 in f.session.retired_stream_ids, f.session.retired_stream_ids)
+    check(f.session.retired_stream_info[1]["recv_terminal_mode"] == "RESET", f.session.retired_stream_info[1])
+    check(f.session.application_rx_bytes == app_before, f.session.application_rx_bytes)
+    check(f.session.session_send_committed == send_commit_before, f.session.session_send_committed)
+    check(f.session.session_recv_committed == recv_commit_before, f.session.session_recv_committed)
+    return {
+        "preconditions": before,
+        "reset_tx": reset_tx,
+        "stop_tx": stop_tx,
+        "consumed_tx": consumed_tx,
+        "no_new_reset": True,
+    }
+
+
+async def prepare_data_retired_identity(f: Fixture) -> Tuple[Peer, object, dict]:
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    core = f.core
+    cid = peer.carrier.carrier_id
+    carrier = f.session.carriers[cid]
+    await peer.carrier.send_frame(core.FRAME_SESSION_CREDIT, consumed_bytes=0, maximum_bytes=8 * 1024 * 1024)
+    await peer.carrier.send_frame(core.FRAME_STREAM_CREDIT, stream_id=1, consumed_offset=0, maximum_offset=1024 * 1024)
+    await f.ping(peer, 0xC221)
+
+    data_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STREAM_DATA,
+        stream_id=1,
+        offset=0,
+        transmission_id=data_tx,
+        data=b"ABCD",
+    )
+    data_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(data_ack["transmission_id"]) == data_tx, data_ack)
+    check(bytes(stream.recv_data) == b"ABCD", stream.recv_data)
+
+    stop_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(core.FRAME_STOP_SENDING, stream_id=1, transmission_id=stop_tx, stream_error_code=0)
+    stop_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(stop_ack["transmission_id"]) == stop_tx, stop_ack)
+    local_reset = await peer.recv_until(core.FRAME_RESET_STREAM)
+    check(int(local_reset["final_offset"]) == 0, local_reset)
+    await peer.carrier.send_frame(
+        core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=int(local_reset["transmission_id"]),
+        receiver_timestamp_us=0,
+    )
+
+    peer_reset_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_RESET_STREAM,
+        stream_id=1,
+        transmission_id=peer_reset_tx,
+        final_offset=4,
+        stream_error_code=0,
+    )
+    reset_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(reset_ack["transmission_id"]) == peer_reset_tx, reset_ack)
+
+    local_consumed = await f.session.send_stream_consumed(stream, carrier)
+    consumed = await peer.recv_until(core.FRAME_STREAM_CONSUMED)
+    check(int(consumed["transmission_id"]) == local_consumed.txid and int(consumed["final_offset"]) == 4, consumed)
+    await peer.carrier.send_frame(
+        core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=local_consumed.txid,
+        receiver_timestamp_us=0,
+    )
+
+    peer_consumed_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STREAM_CONSUMED,
+        stream_id=1,
+        transmission_id=peer_consumed_tx,
+        final_offset=0,
+    )
+    peer_consumed_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(peer_consumed_ack["transmission_id"]) == peer_consumed_tx, peer_consumed_ack)
+    await f.ping(peer, 0xC222)
+
+    check(stream.send_final == 0 and stream.recv_final == 4, (stream.send_final, stream.recv_final))
+    check(stream.send_terminal_mode == stream.recv_terminal_mode == "RESET", "both directions RESET")
+    check(stream.local_terminal_settled and stream.local_consumed and stream.peer_final_consumed, "retirement prerequisites")
+    check(all(tx.settled for tx in f.session.local_tx.values()), "local reliable state settled")
+    check(stream.recv_committed == f.session.session_recv_committed == 4, (stream.recv_committed, f.session.session_recv_committed))
+    before = {
+        "application_rx_bytes": f.session.application_rx_bytes,
+        "send_committed": f.session.session_send_committed,
+        "recv_committed": f.session.session_recv_committed,
+        "recv_data": bytes(stream.recv_data),
+    }
+    f.session.retire_stream_to_tombstone(1)
+    f.session.compact_tombstone(1)
+    return peer, stream, before
+
+
+async def case_retired_first_late_data(f: Fixture) -> dict:
+    peer, stream, before = await prepare_data_retired_identity(f)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_DATA,
+        stream_id=1,
+        offset=0,
+        transmission_id=txid,
+        data=b"ABCD",
+    )
+    ack = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(ack["transmission_id"]) == txid, ack)
+    await f.ping(peer, 0xC223)
+    check(1 not in f.session.streams and 1 in f.session.retired_stream_ids, f.session.retired_stream_ids)
+    check(f.session.application_rx_bytes == before["application_rx_bytes"], f.session.application_rx_bytes)
+    check(f.session.session_send_committed == before["send_committed"], f.session.session_send_committed)
+    check(f.session.session_recv_committed == before["recv_committed"], f.session.session_recv_committed)
+    check(bytes(stream.recv_data) == before["recv_data"], stream.recv_data)
+    return {"txid": txid, "stale_data_acknowledged": True, "application_redelivery": False}
+
+
+async def case_retired_first_late_final_conflict(f: Fixture) -> dict:
+    peer, _, _ = await prepare_credit_tombstone(f)
+    f.session.compact_tombstone(1)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_FIN,
+        stream_id=1,
+        transmission_id=txid,
+        final_offset=1,
+    )
+    close = await f.expect_session_close(peer, ERROR_FINAL_SIZE, f.core.FRAME_STREAM_FIN)
+    return {"txid": txid, "close": close}
+
+
+async def case_retired_first_late_tx_conflict(f: Fixture) -> dict:
+    peer, _, _ = await prepare_credit_tombstone(f)
+    f.session.compact_tombstone(1)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_FIN,
+        stream_id=1,
+        transmission_id=txid,
+        final_offset=0,
+    )
+    ack = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(ack["transmission_id"]) == txid, ack)
+    await peer.carrier.send_frame(
+        f.core.FRAME_RESET_STREAM,
+        stream_id=1,
+        transmission_id=txid,
+        final_offset=0,
+        stream_error_code=0,
+    )
+    close = await f.expect_session_close(peer, ERROR_TRANSMISSION_ID, f.core.FRAME_RESET_STREAM)
+    return {"txid": txid, "first_confirmation": "ACK", "close": close}
+
+
 CASES = {
     "normal-data": case_normal_data,
     "fin-fill-hole": case_fin_fill_hole,
@@ -2025,6 +2405,12 @@ CASES = {
     "conflicting-open-reject": case_conflicting_open_reject,
     "late-stop-tombstone": case_late_stop_tombstone,
     "retired-fin-confirmation-replay": case_retired_fin_confirmation_replay,
+    "cross-carrier-reject-atomicity": case_cross_carrier_reject_atomicity,
+    "retired-delayed-fin-recovery": case_retired_delayed_fin_recovery,
+    "retired-first-late-controls": case_retired_first_late_controls,
+    "retired-first-late-data": case_retired_first_late_data,
+    "retired-first-late-final-conflict": case_retired_first_late_final_conflict,
+    "retired-first-late-tx-conflict": case_retired_first_late_tx_conflict,
 }
 
 
@@ -2033,7 +2419,7 @@ async def run_one(
     role: str,
     case_name: str,
 ) -> dict:
-    max_streams = 1 if case_name in {"stream-limit", "capacity-reject-replay"} else 32
+    max_streams = 1 if case_name in {"stream-limit", "capacity-reject-replay", "cross-carrier-reject-atomicity"} else 32
     async with Fixture(implementation, role, max_streams=max_streams) as fixture:
         detail = await CASES[case_name](fixture)
         return {
@@ -2065,6 +2451,7 @@ async def amain(args: argparse.Namespace) -> dict:
                     "invalid-preopen-stop-id",
                     "valid-preopen-stop-unseen",
                     "capacity-reject-replay",
+                    "cross-carrier-reject-atomicity",
                     "accepted-open-replay-tombstone",
                 }
                 client_only = {
