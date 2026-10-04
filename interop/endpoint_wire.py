@@ -1674,6 +1674,306 @@ async def case_unknown_stream_credit(f: Fixture) -> dict:
     return {"close": close}
 
 
+async def terminalize_open_stream_zero(f: Fixture, peer: Peer, stream: object) -> dict:
+    core = f.core
+    carrier = f.session.carriers[peer.carrier.carrier_id]
+    cid = peer.carrier.carrier_id
+
+    stop_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=stop_tx,
+        stream_error_code=0,
+    )
+    stop_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(stop_ack["transmission_id"]) == stop_tx, stop_ack)
+    local_reset = await peer.recv_until(core.FRAME_RESET_STREAM)
+    check(int(local_reset["final_offset"]) == 0, local_reset)
+    await peer.carrier.send_frame(
+        core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=int(local_reset["transmission_id"]),
+        receiver_timestamp_us=0,
+    )
+
+    peer_reset_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_RESET_STREAM,
+        stream_id=1,
+        transmission_id=peer_reset_tx,
+        final_offset=0,
+        stream_error_code=0,
+    )
+    reset_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(reset_ack["transmission_id"]) == peer_reset_tx, reset_ack)
+
+    consumed_tx = await f.session.send_stream_consumed(stream, carrier)
+    consumed = await peer.recv_until(core.FRAME_STREAM_CONSUMED)
+    check(int(consumed["transmission_id"]) == consumed_tx.txid, consumed)
+    check(int(consumed["final_offset"]) == 0, consumed)
+    await peer.carrier.send_frame(
+        core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=consumed_tx.txid,
+        receiver_timestamp_us=0,
+    )
+
+    peer_consumed_tx = f.next_peer_tx(cid)
+    await peer.carrier.send_frame(
+        core.FRAME_STREAM_CONSUMED,
+        stream_id=1,
+        transmission_id=peer_consumed_tx,
+        final_offset=0,
+    )
+    consumed_ack = await peer.recv_until(core.FRAME_TRANSMISSION_ACK)
+    check(int(consumed_ack["transmission_id"]) == peer_consumed_tx, consumed_ack)
+    await f.ping(peer, 0xC201)
+
+    check(stream.send_final == 0 and stream.recv_final == 0, (stream.send_final, stream.recv_final))
+    check(stream.send_terminal_mode == stream.recv_terminal_mode == "RESET", "zero-terminal RESET")
+    check(stream.local_terminal_settled and stream.local_consumed and stream.peer_final_consumed, "zero-terminal settlement")
+    check(all(tx.settled for tx in f.session.local_tx.values()), "local reliable state settled")
+    tombstone = f.session.retire_stream_to_tombstone(1)
+    check(1 not in f.session.streams and 1 in f.session.tombstones, f.session.tombstones)
+    return dict(tombstone)
+
+
+async def open_pending_client_stream(f: Fixture, peer: Peer) -> Tuple[object, object]:
+    stream = f.runtime.StreamState(stream_id=1, lifecycle="OPENING", accepted=False)
+    f.session.streams[1] = stream
+    tx = f.session.alloc_tx(f.core.FRAME_STREAM_OPEN, 1)
+    stream.opening_txid = tx.txid
+    await f.session.send_tx(tx, f.session.carriers[peer.carrier.carrier_id])
+    opened = await peer.recv_until(f.core.FRAME_STREAM_OPEN)
+    check(int(opened["stream_id"]) == 1 and int(opened["transmission_id"]) == tx.txid, opened)
+    return stream, tx
+
+
+async def case_padding_ignored(f: Fixture) -> dict:
+    peer = await f.establish()
+    token = 0xC210
+    plaintext = (
+        f.core.encode_frame(f.core.FRAME_PADDING, b"\x00\xff\x5a")
+        + f.core.encode_frame(f.core.FRAME_PING, f.core.vi_enc(token))
+    )
+    await peer.send_raw_plaintext(plaintext)
+    pong = await peer.recv_until(f.core.FRAME_PONG)
+    check(int(pong["token"]) == token, pong)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"padding_octets": 3, "pong": token}
+
+
+async def case_unknown_extension_skipped(f: Fixture) -> dict:
+    peer = await f.establish()
+    token = 0xC211
+    plaintext = (
+        f.core.encode_frame(0x40, b"extension-body")
+        + f.core.encode_frame(f.core.FRAME_PING, f.core.vi_enc(token))
+    )
+    await peer.send_raw_plaintext(plaintext)
+    pong = await peer.recv_until(f.core.FRAME_PONG)
+    check(int(pong["token"]) == token, pong)
+    check(f.session.state == "ACTIVE", f.session.state)
+    return {"extension_type": 0x40, "pong": token}
+
+
+async def case_unknown_core_session_scope(f: Fixture) -> dict:
+    first = await f.establish()
+    second = await f.establish(96)
+    await first.send_raw_plaintext(f.core.encode_frame(0x3F, b""))
+    close = await f.expect_session_close(first, ERROR_PROTOCOL_VIOLATION, 0x3F)
+    await second.expect_no(f.core.FRAME_PONG, timeout=0.10)
+    check(f.session.state == "CLOSED", f.session.state)
+    return {"close": close, "alternate_carrier_closed": True}
+
+
+async def case_invalid_preopen_stop_id(f: Fixture) -> dict:
+    check(f.endpoint_role == "server", "invalid pre-open STOP targets server receiver")
+    peer = await f.establish()
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=2,
+        transmission_id=txid,
+        stream_error_code=0,
+    )
+    close = await f.expect_session_close(peer, ERROR_STREAM_STATE, f.core.FRAME_STOP_SENDING)
+    check(2 not in f.session.opening_tombstones, f.session.opening_tombstones)
+    return {"close": close, "invalid_stream_id": 2}
+
+
+async def case_valid_preopen_stop_unseen(f: Fixture) -> dict:
+    check(f.endpoint_role == "server", "pre-open STOP positive targets server receiver")
+    peer = await f.establish()
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=txid,
+        stream_error_code=7,
+    )
+    ack = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(ack["transmission_id"]) == txid, ack)
+    reset = await peer.recv_until(f.core.FRAME_RESET_STREAM)
+    check(int(reset["stream_id"]) == 1 and int(reset["final_offset"]) == 0, reset)
+    await peer.carrier.send_frame(
+        f.core.FRAME_TRANSMISSION_ACK,
+        stream_id=1,
+        transmission_id=int(reset["transmission_id"]),
+        receiver_timestamp_us=0,
+    )
+    await f.ping(peer, 0xC212)
+    check(1 in f.session.opening_tombstones and f.session.state == "ACTIVE", f.session.opening_tombstones)
+    return {"acknowledged": txid, "reset_final": 0}
+
+
+async def case_capacity_reject_replay(f: Fixture) -> dict:
+    check(f.endpoint_role == "server", "capacity reject replay targets server receiver")
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN,
+        stream_id=3,
+        transmission_id=txid,
+    )
+    first = await peer.recv_until(f.core.FRAME_STREAM_OPEN_REJECT)
+    check(int(first["error_code"]) == ERROR_STREAM_LIMIT, first)
+    await terminalize_open_stream_zero(f, peer, stream)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN,
+        stream_id=3,
+        transmission_id=txid,
+    )
+    second = await peer.recv_until(f.core.FRAME_STREAM_OPEN_REJECT)
+    check(int(second["transmission_id"]) == txid, second)
+    check(int(second["error_code"]) == int(first["error_code"]), (first, second))
+    check(3 not in f.session.streams, f.session.streams)
+    await f.ping(peer, 0xC213)
+    return {"original_error": first["error_code"], "replayed_error": second["error_code"]}
+
+
+async def case_accepted_open_replay_tombstone(f: Fixture) -> dict:
+    check(f.endpoint_role == "server", "accepted STREAM_OPEN replay targets server receiver")
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    opening_txid = int(stream.opening_txid)
+    await terminalize_open_stream_zero(f, peer, stream)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN,
+        stream_id=1,
+        transmission_id=opening_txid,
+    )
+    replay = await peer.recv_until(f.core.FRAME_STREAM_OPEN_OK)
+    check(int(replay["transmission_id"]) == opening_txid, replay)
+    check(1 not in f.session.streams and 1 in f.session.tombstones, f.session.tombstones)
+    await f.ping(peer, 0xC214)
+    return {"opening_txid": opening_txid, "decision": "OPEN_OK"}
+
+
+async def case_accepted_open_ok_replay_tombstone(f: Fixture) -> dict:
+    check(f.endpoint_role == "client", "late OPEN_OK replay targets client receiver")
+    peer = await f.establish()
+    stream = await f.open_stream(peer)
+    opening_txid = int(stream.opening_txid)
+    await terminalize_open_stream_zero(f, peer, stream)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN_OK,
+        stream_id=1,
+        transmission_id=opening_txid,
+    )
+    await f.ping(peer, 0xC215)
+    check(f.session.state == "ACTIVE", f.session.state)
+    check(1 not in f.session.streams and 1 in f.session.tombstones, f.session.tombstones)
+    return {"opening_txid": opening_txid, "duplicate_confirmation": True}
+
+
+async def case_duplicate_open_reject(f: Fixture) -> dict:
+    check(f.endpoint_role == "client", "OPEN_REJECT duplicate targets client receiver")
+    peer = await f.establish()
+    _, tx = await open_pending_client_stream(f, peer)
+    fields = {
+        "stream_id": 1,
+        "transmission_id": tx.txid,
+        "error_code": ERROR_STREAM_LIMIT,
+    }
+    await peer.carrier.send_frame(f.core.FRAME_STREAM_OPEN_REJECT, **fields)
+    await f.ping(peer, 0xC216)
+    retained = dict(f.session.opening_tombstones[1])
+    await peer.carrier.send_frame(f.core.FRAME_STREAM_OPEN_REJECT, **fields)
+    await f.ping(peer, 0xC217)
+    check(f.session.state == "ACTIVE", f.session.state)
+    check(f.session.opening_tombstones[1] == retained, f.session.opening_tombstones[1])
+    return {"error_code": ERROR_STREAM_LIMIT, "idempotent": True}
+
+
+async def case_conflicting_open_reject(f: Fixture) -> dict:
+    check(f.endpoint_role == "client", "conflicting OPEN_REJECT targets client receiver")
+    peer = await f.establish()
+    _, tx = await open_pending_client_stream(f, peer)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN_REJECT,
+        stream_id=1,
+        transmission_id=tx.txid,
+        error_code=ERROR_STREAM_LIMIT,
+    )
+    await f.ping(peer, 0xC218)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_OPEN_REJECT,
+        stream_id=1,
+        transmission_id=tx.txid,
+        error_code=ERROR_STREAM_STATE,
+    )
+    close = await f.expect_session_close(peer, ERROR_STREAM_STATE, f.core.FRAME_STREAM_OPEN_REJECT)
+    return {"close": close, "original_error": ERROR_STREAM_LIMIT, "conflicting_error": ERROR_STREAM_STATE}
+
+
+async def case_late_stop_tombstone(f: Fixture) -> dict:
+    peer, _, before = await prepare_credit_tombstone(f)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STOP_SENDING,
+        stream_id=1,
+        transmission_id=txid,
+        stream_error_code=7,
+    )
+    ack = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(ack["transmission_id"]) == txid, ack)
+    await peer.expect_no(f.core.FRAME_RESET_STREAM, timeout=0.15)
+    check(f.session.tombstones[1]["send_final"] == before["send_final"] == 4, f.session.tombstones[1])
+    check(1 not in f.session.opening_tombstones, f.session.opening_tombstones)
+    await f.ping(peer, 0xC219)
+    return {"send_final": 4, "new_reset": False}
+
+
+async def case_retired_fin_confirmation_replay(f: Fixture) -> dict:
+    peer, _, before = await prepare_credit_tombstone(f)
+    txid = f.next_peer_tx(peer.carrier.carrier_id)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_FIN,
+        stream_id=1,
+        transmission_id=txid,
+        final_offset=0,
+    )
+    first = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(first["transmission_id"]) == txid, first)
+    check(txid in f.session.peer_tx_confirmation and f.session.peer_retired_through == 0, f.session.peer_tx_confirmation)
+    f.session.compact_tombstone(1)
+    check(1 in f.session.retired_stream_ids and 1 not in f.session.tombstones, f.session.retired_stream_ids)
+    await peer.carrier.send_frame(
+        f.core.FRAME_STREAM_FIN,
+        stream_id=1,
+        transmission_id=txid,
+        final_offset=0,
+    )
+    second = await peer.recv_until(f.core.FRAME_TRANSMISSION_ACK)
+    check(int(second["transmission_id"]) == txid, second)
+    check(f.session.state == "ACTIVE" and 1 not in f.session.streams, f.session.state)
+    await f.ping(peer, 0xC21A)
+    return {"preconditions": before, "txid": txid, "confirmation_replayed": True}
+
+
 CASES = {
     "normal-data": case_normal_data,
     "fin-fill-hole": case_fin_fill_hole,
@@ -1713,6 +2013,18 @@ CASES = {
     "tombstone-credit-window-exceeded": case_tombstone_credit_window_exceeded,
     "retired-credit-ignored": case_retired_credit_ignored,
     "unknown-stream-credit": case_unknown_stream_credit,
+    "padding-ignored": case_padding_ignored,
+    "unknown-extension-skipped": case_unknown_extension_skipped,
+    "unknown-core-session-scope": case_unknown_core_session_scope,
+    "invalid-preopen-stop-id": case_invalid_preopen_stop_id,
+    "valid-preopen-stop-unseen": case_valid_preopen_stop_unseen,
+    "capacity-reject-replay": case_capacity_reject_replay,
+    "accepted-open-replay-tombstone": case_accepted_open_replay_tombstone,
+    "accepted-open-ok-replay-tombstone": case_accepted_open_ok_replay_tombstone,
+    "duplicate-open-reject": case_duplicate_open_reject,
+    "conflicting-open-reject": case_conflicting_open_reject,
+    "late-stop-tombstone": case_late_stop_tombstone,
+    "retired-fin-confirmation-replay": case_retired_fin_confirmation_replay,
 }
 
 
@@ -1721,7 +2033,7 @@ async def run_one(
     role: str,
     case_name: str,
 ) -> dict:
-    max_streams = 1 if case_name == "stream-limit" else 32
+    max_streams = 1 if case_name in {"stream-limit", "capacity-reject-replay"} else 32
     async with Fixture(implementation, role, max_streams=max_streams) as fixture:
         detail = await CASES[case_name](fixture)
         return {
@@ -1745,12 +2057,24 @@ async def amain(args: argparse.Namespace) -> dict:
     for implementation in selected_impl:
         for role in selected_roles:
             for case_name in selected_cases:
-                if case_name in {
+                server_only = {
                     "stream-limit",
                     "invalid-stream-parity",
                     "candidate-conflict",
                     "create-collision",
-                } and role != "server":
+                    "invalid-preopen-stop-id",
+                    "valid-preopen-stop-unseen",
+                    "capacity-reject-replay",
+                    "accepted-open-replay-tombstone",
+                }
+                client_only = {
+                    "accepted-open-ok-replay-tombstone",
+                    "duplicate-open-reject",
+                    "conflicting-open-reject",
+                }
+                if case_name in server_only and role != "server":
+                    continue
+                if case_name in client_only and role != "client":
                     continue
                 result = await run_one(implementation, role, case_name)
                 results.append(result)

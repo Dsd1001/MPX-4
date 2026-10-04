@@ -254,7 +254,7 @@ def execute(out_dir: Path) -> dict:
     ])
     endpoint_wire = read(endpoint_wire_dir / "endpoint-wire-report.json")
     check(endpoint_wire.get("status") == "PASS", "aggregate endpoint-wire suite failed")
-    check(endpoint_wire.get("execution_count") == 144, "expected 144 baseline authenticated endpoint-wire executions")
+    check(endpoint_wire.get("execution_count") == 178, "expected 178 baseline authenticated endpoint-wire executions")
     run([
         sys.executable,
         "-m",
@@ -275,7 +275,7 @@ def execute(out_dir: Path) -> dict:
     ])
     sensitivity = read(sensitivity_dir / "endpoint-sensitivity-report.json")
     check(sensitivity.get("status") == "PASS", "endpoint sensitivity suite failed")
-    check(sensitivity.get("control_count") == 16, "expected sixteen deliberate-defect sensitivity controls")
+    check(sensitivity.get("control_count") == 32, "expected thirty-two deliberate-defect sensitivity controls")
 
     basic = []
     faults = []
@@ -332,7 +332,7 @@ def execute(out_dir: Path) -> dict:
         },
         "claim": (
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
-            "144 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and sixteen deliberate-defect "
+            "178 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and thirty-two deliberate-defect "
             "sensitivity controls pass; A/B real-TCP role reversal passes the basic and five fault profiles in direct and fragmented modes."
         ),
         "claim_boundary": (

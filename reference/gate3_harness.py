@@ -98,7 +98,7 @@ ENDPOINT_WIRE_CASES = {
     "E4": ("conflicting-txid-reuse",),
     "E6": ("txid-exhaustion",),
     "E7": ("retirement-watermark",),
-    "E8": ("confirmation-class",),
+    "E8": ("confirmation-class", "duplicate-open-reject", "conflicting-open-reject"),
     "E10": ("allocated-tx-survives-loss",),
     "F2": ("stream-boundary",),
     "F3": ("session-aggregate-credit",),
@@ -118,14 +118,14 @@ ENDPOINT_WIRE_CASES = {
     "H1": ("credit-overtakes-open-ok",),
     "H2": ("data-before-open-ok",),
     "H3": ("preopen-reset",),
-    "H4": ("preopen-stop", "stop-sending-directionality"),
+    "H4": ("preopen-stop", "stop-sending-directionality", "valid-preopen-stop-unseen"),
     "H5": ("acceptance-wins-cancel",),
     "I1": ("tombstone-terminal-duplicate",),
     "I2": ("tombstone-conflicting-final", "tombstone-credit-beyond-final", "tombstone-credit-invalid-pair", "tombstone-credit-window-exceeded"),
-    "I3": ("retired-stale-no-recreate", "retired-credit-ignored"),
-    "I4": ("stream-id-reuse",),
+    "I3": ("retired-stale-no-recreate", "retired-credit-ignored", "retired-fin-confirmation-replay"),
+    "I4": ("stream-id-reuse", "capacity-reject-replay", "accepted-open-replay-tombstone", "accepted-open-ok-replay-tombstone"),
     "I5": ("tombstone-not-active-limit",),
-    "I6": ("terminal-confirmation-replay",),
+    "I6": ("terminal-confirmation-replay", "retired-fin-confirmation-replay"),
     "J5": ("failed-candidate-nonmutating",),
     "J6": ("stale-generation",),
     "J7": ("candidate-conflict",),
@@ -140,7 +140,7 @@ ENDPOINT_WIRE_CASES = {
     "K4": ("duplicate-session-close",),
     "K5": ("tcp-half-close",),
     "K6": ("close-tail",),
-    "L4": ("invalid-stream-parity",),
+    "L4": ("invalid-stream-parity", "invalid-preopen-stop-id"),
     "L5": ("flow-control-data",),
     "L6": ("session-aggregate-credit",),
     "L7": ("terminal-credit-violation",),
@@ -150,8 +150,8 @@ ENDPOINT_WIRE_CASES = {
     "L11": ("conflicting-txid-reuse",),
     "L12": ("nonzero-record-flags",),
     "L13": ("close-tail",),
-    "L14": ("unknown-stream-data",),
-    "L15": ("stream-limit",),
+    "L14": ("unknown-stream-data", "late-stop-tombstone"),
+    "L15": ("stream-limit", "capacity-reject-replay"),
     "L16": ("candidate-conflict",),
     "L17": ("create-collision",),
     "L18": ("handshake-reject-no-mutation",),
@@ -161,11 +161,17 @@ ENDPOINT_WIRE_CASES = {
     "L22": ("fin-data-beyond-final", "final-below-commitment"),
     "L23": ("never-allocated-ack",),
     "L24": ("shutdown-blocks-new-work",),
-    "L25": ("flow-control-data", "final-below-commitment", "never-allocated-ack"),
+    "L25": ("flow-control-data", "final-below-commitment", "never-allocated-ack", "unknown-core-session-scope"),
 }
 
 SERVER_ONLY_ENDPOINT_CASES = {
-    "stream-limit", "invalid-stream-parity", "candidate-conflict", "create-collision"
+    "stream-limit", "invalid-stream-parity", "candidate-conflict", "create-collision",
+    "invalid-preopen-stop-id", "valid-preopen-stop-unseen",
+    "capacity-reject-replay", "accepted-open-replay-tombstone",
+}
+
+CLIENT_ONLY_ENDPOINT_CASES = {
+    "accepted-open-ok-replay-tombstone", "duplicate-open-reject", "conflicting-open-reject",
 }
 
 L_DESCRIPTIONS = {
@@ -330,7 +336,7 @@ class Gate3:
         for name in required:
             hits = [x for x in executions if x.get("case") == name and x.get("status") == "PASS"]
             from_mandatory_suite = any(x.get("source_suite") == "endpoint-mandatory" for x in hits)
-            expected = 1 if from_mandatory_suite or name in SERVER_ONLY_ENDPOINT_CASES else 2
+            expected = 1 if from_mandatory_suite or name in SERVER_ONLY_ENDPOINT_CASES or name in CLIENT_ONLY_ENDPOINT_CASES else 2
             check(
                 len(hits) == expected,
                 f"{case_id} requires endpoint-wire {name}: expected {expected} execution(s), got {len(hits)}",

@@ -32,9 +32,11 @@ from .core import (
     AuthenticationError,
     Carrier,
     FlowControlError,
+    FrameTypeProtocolError,
     FRAME_CARRIER_CLOSE,
     FRAME_CREDIT_PROBE,
     FRAME_NAMES,
+    FRAME_PADDING,
     FRAME_PING,
     FRAME_PONG,
     FRAME_RESET_STREAM,
@@ -265,6 +267,7 @@ class IndependentSession:
         self.opening_tombstones: Dict[int, Dict[str, object]] = {}
         self.tombstones: Dict[int, Dict[str, object]] = {}
         self.retired_stream_ids: Set[int] = set()
+        self.retired_stream_info: Dict[int, Dict[str, object]] = {}
         self.next_stream_id = 1
         self.next_txid = 1
         self.local_tx: Dict[int, TxState] = {}
@@ -730,6 +733,14 @@ class IndependentSession:
                 except AuthenticationError as exc:
                     await self._terminate_carrier(carrier, ERROR_AUTHENTICATION_FAILED, str(exc), False)
                     return
+                except FrameTypeProtocolError as exc:
+                    await self.fail_session(
+                        ERROR_PROTOCOL_VIOLATION,
+                        exc.frame_type,
+                        f"PROTOCOL_VIOLATION: {exc}",
+                        carrier,
+                    )
+                    return
                 except ProtocolError as exc:
                     await self._terminate_carrier(carrier, ERROR_FRAME_ENCODING, str(exc), True)
                     return
@@ -851,17 +862,39 @@ class IndependentSession:
             "recv_terminal_mode": stream.recv_terminal_mode,
             "send_terminal_mode": stream.send_terminal_mode,
             "opening_txid": stream.opening_txid,
+            "opening_decision": "accepted" if stream.accepted else None,
         }
         self.tombstones[stream_id] = snapshot
         self.trace.emit("stream_tombstoned", session_id=self.session_id.hex() if self.session_id else None, stream_id=stream_id)
         return snapshot
 
     def compact_tombstone(self, stream_id: int) -> None:
-        existed = self.tombstones.pop(stream_id, None)
-        if existed is None:
-            existed = self.opening_tombstones.pop(stream_id, None)
-        if existed is None:
+        retained = self.tombstones.get(stream_id)
+        if retained is None:
+            retained = self.opening_tombstones.get(stream_id)
+        if retained is None:
             raise RuntimeError("cannot compact unknown Stream identity")
+        pending_local = [
+            item.txid for item in self.local_tx.values()
+            if item.stream_id == stream_id and not item.settled
+        ]
+        if pending_local:
+            raise RuntimeError(f"cannot compact Stream with unsettled local Transmissions {pending_local}")
+        no_replay = []
+        for txid, semantic in self.peer_tx_semantics.items():
+            semantic_fields = dict(semantic[1])
+            if int(semantic_fields.get("stream_id", -1)) != stream_id:
+                continue
+            if txid > self.peer_retired_through and txid not in self.peer_tx_confirmation:
+                no_replay.append(txid)
+        if no_replay:
+            raise RuntimeError(f"cannot compact Stream without confirmation replay {no_replay}")
+        snapshot = dict(retained)
+        if "opening_decision" not in snapshot and "decision" in snapshot:
+            snapshot["opening_decision"] = snapshot.get("decision")
+        self.retired_stream_info[stream_id] = snapshot
+        self.tombstones.pop(stream_id, None)
+        self.opening_tombstones.pop(stream_id, None)
         self.retired_stream_ids.add(stream_id)
         self.trace.emit("stream_identity_retired", session_id=self.session_id.hex() if self.session_id else None, stream_id=stream_id)
 
@@ -870,6 +903,49 @@ class IndependentSession:
             raise RuntimeError("DORMANT retirement precondition failed")
         self.dormant_retired = True
         self.set_state("CLOSED", reason="dormant-retention-expired")
+
+    def require_peer_stream_id(self, stream_id: int) -> None:
+        if stream_id <= 0 or stream_id % 2 == 0:
+            raise StreamStateError("peer used an invalid client Stream ID")
+
+    async def resend_confirmation(self, incoming: Carrier, txid: int) -> bool:
+        saved = self.peer_tx_confirmation.get(txid)
+        if saved is None:
+            return False
+        response_type, response_fields = saved
+        target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+        payload = dict(response_fields)
+        if response_type == FRAME_TRANSMISSION_ACK:
+            payload["receiver_timestamp_us"] = target.timestamp_us()
+        await self.send_frame(target, response_type, **payload)
+        self.trace.emit(
+            "confirmation_replayed",
+            session_id=self.session_id.hex() if self.session_id else None,
+            transmission_id=txid,
+            frame_type=FRAME_NAMES.get(response_type, response_type),
+        )
+        return True
+
+    async def handle_retired_replay(
+        self,
+        incoming: Carrier,
+        frame_type: int,
+        fields: Dict[str, object],
+    ) -> bool:
+        stream_id = int(fields["stream_id"])
+        if stream_id not in self.retired_stream_ids:
+            return False
+        txid = int(fields["transmission_id"])
+        if txid <= self.peer_retired_through:
+            return True
+        remembered = self.peer_tx_semantics.get(txid)
+        if remembered is None:
+            return False
+        if remembered != self.peer_semantic(frame_type, fields):
+            raise TransmissionError(f"retired peer Transmission {txid} changed semantics")
+        if not await self.resend_confirmation(incoming, txid):
+            raise TransmissionError(f"retired peer Transmission {txid} lost confirmation replay")
+        return True
 
     async def send_stream_consumed(self, stream: StreamState, carrier: Carrier) -> TxState:
         if stream.recv_final is None:
@@ -902,6 +978,9 @@ class IndependentSession:
         if frame_type == FRAME_STREAM_DATA:
             info["data_length"] = len(fields["data"])  # type: ignore[arg-type]
         self.trace.emit("frame_recv", **info)
+
+        if frame_type == FRAME_PADDING:
+            return
 
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"])
@@ -968,32 +1047,66 @@ class IndependentSession:
         if frame_type == FRAME_STREAM_OPEN_OK:
             stream_id = int(fields["stream_id"])
             txid = int(fields["transmission_id"])
+            self.require_peer_stream_id(stream_id)
             stream = self.streams.get(stream_id)
-            if stream is None:
-                raise TransmissionError("OPEN_OK for unknown Stream")
+            if stream is not None:
+                if stream.accepted and stream.lifecycle != "OPENING":
+                    self.settle_tx(txid, "OPEN_OK", stream_id)
+                    return
+                self.settle_tx(txid, "OPEN_OK", stream_id)
+                stream.accepted = True
+                stream.lifecycle = "OPEN"
+                stream.open_event.set()
+                return
             self.settle_tx(txid, "OPEN_OK", stream_id)
-            stream.accepted = True
-            stream.lifecycle = "OPEN"
-            stream.open_event.set()
+            retained = self.opening_tombstones.get(stream_id)
+            if retained is None:
+                retained = self.tombstones.get(stream_id)
+            if retained is None:
+                retained = self.retired_stream_info.get(stream_id)
+            if retained is None:
+                raise StreamStateError("OPEN_OK references unknown Stream identity")
+            decision = retained.get("opening_decision", retained.get("decision"))
+            if decision != "accepted":
+                raise StreamStateError("OPEN_OK contradicts retained opening result")
             return
 
         if frame_type == FRAME_STREAM_OPEN_REJECT:
             stream_id = int(fields["stream_id"])
             txid = int(fields["transmission_id"])
+            error_code = int(fields["error_code"])
+            self.require_peer_stream_id(stream_id)
             stream = self.streams.get(stream_id)
-            if stream is None:
-                if stream_id in self.opening_tombstones or stream_id in self.retired_stream_ids:
-                    return
-                raise StreamStateError("OPEN_REJECT for unknown Stream")
-            if stream.accepted:
-                raise StreamStateError("OPEN_REJECT cannot override prior acceptance evidence")
+            if stream is not None:
+                if stream.accepted:
+                    raise StreamStateError("OPEN_REJECT cannot override prior acceptance evidence")
+                self.settle_tx(txid, "OPEN_REJECT", stream_id)
+                decision = "cancelled" if stream.lifecycle == "OPENING_CANCEL_PENDING" else "rejected"
+                self.streams.pop(stream_id, None)
+                self.opening_tombstones[stream_id] = {
+                    "opening_txid": txid,
+                    "decision": decision,
+                    "opening_decision": decision,
+                    "error_code": error_code,
+                }
+                return
             self.settle_tx(txid, "OPEN_REJECT", stream_id)
-            self.streams.pop(stream_id, None)
-            self.opening_tombstones[stream_id] = {
-                "opening_txid": txid,
-                "decision": "cancelled" if stream.lifecycle == "OPENING_CANCEL_PENDING" else "rejected",
-                "error_code": int(fields["error_code"]),
-            }
+            retained = self.opening_tombstones.get(stream_id)
+            if retained is None:
+                retained = self.tombstones.get(stream_id)
+            if retained is None:
+                retained = self.retired_stream_info.get(stream_id)
+            if retained is None:
+                raise StreamStateError("OPEN_REJECT references unknown Stream identity")
+            decision = retained.get("opening_decision", retained.get("decision"))
+            if decision not in {"rejected", "cancelled"}:
+                raise StreamStateError("OPEN_REJECT contradicts retained acceptance")
+            original_tx = retained.get("opening_txid")
+            if original_tx is not None and int(original_tx) != txid:
+                raise TransmissionError("OPEN_REJECT references wrong opening Transmission")
+            old_error = retained.get("error_code")
+            if old_error is not None and int(old_error) != error_code:
+                raise StreamStateError("OPEN_REJECT changed retained Error Code")
             return
 
         if frame_type == FRAME_STREAM_DATA:
@@ -1025,10 +1138,12 @@ class IndependentSession:
                 tomb = self.tombstones.get(stream_id)
                 if tomb is not None and tomb.get("send_final") != final_offset:
                     raise FinalSizeError("STREAM_CONSUMED conflicts with tombstone")
-                if tomb is None and not (stream_id in self.retired_stream_ids and txid <= self.peer_retired_through):
-                    raise StreamStateError("STREAM_CONSUMED for unknown Stream")
+                if tomb is None and stream_id in self.retired_stream_ids:
+                    if await self.handle_retired_replay(incoming, frame_type, fields):
+                        return
+                    raise StreamStateError("STREAM_CONSUMED retired without replay state")
                 if tomb is None:
-                    return
+                    raise StreamStateError("STREAM_CONSUMED for unknown Stream")
             self.register_peer_tx(frame_type, fields)
             await self.acknowledge(incoming, stream_id, txid, frame_type)
             return
@@ -1126,59 +1241,97 @@ class IndependentSession:
             raise StreamStateError("Draft 11 Core does not permit a server-initiated Stream")
         stream_id = int(fields["stream_id"])
         txid = int(fields["transmission_id"])
-        if stream_id <= 0 or (stream_id & 1) == 0:
-            raise StreamStateError("peer used an invalid client Stream ID")
-        duplicate = self.register_peer_tx(FRAME_STREAM_OPEN, fields)
-        if stream_id in self.opening_tombstones or stream_id in self.tombstones or stream_id in self.retired_stream_ids:
-            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-            reject_fields = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_STATE}
-            await self.send_frame(reply, FRAME_STREAM_OPEN_REJECT, **reject_fields)
-            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, reject_fields)
+        self.require_peer_stream_id(stream_id)
+
+        cancelled_or_rejected = self.opening_tombstones.get(stream_id)
+        if cancelled_or_rejected is not None:
+            original_tx = cancelled_or_rejected.get("opening_txid")
+            if original_tx is not None and int(original_tx) != txid:
+                raise TransmissionError("retained Stream identity has a different opening Transmission")
+            self.register_peer_tx(FRAME_STREAM_OPEN, fields)
+            if original_tx is not None and await self.resend_confirmation(incoming, txid):
+                return
+            if original_tx is not None and txid <= self.peer_retired_through:
+                return
+            code = int(cancelled_or_rejected.get("error_code", ERROR_STREAM_STATE))
+            cancelled_or_rejected["opening_txid"] = txid
+            decision = str(cancelled_or_rejected.get("decision", "rejected"))
+            cancelled_or_rejected["opening_decision"] = "cancelled" if decision.startswith("preopen") else decision
+            cancelled_or_rejected["error_code"] = code
+            response = {"stream_id": stream_id, "transmission_id": txid, "error_code": code}
+            target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
             return
+
+        terminal = self.tombstones.get(stream_id)
+        if terminal is not None:
+            original_tx = terminal.get("opening_txid")
+            if original_tx is not None and int(original_tx) != txid:
+                raise TransmissionError("accepted tombstone has a different opening Transmission")
+            if original_tx is not None:
+                self.register_peer_tx(FRAME_STREAM_OPEN, fields)
+                if await self.resend_confirmation(incoming, txid):
+                    return
+                if txid <= self.peer_retired_through:
+                    return
+                target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+                response = {"stream_id": stream_id, "transmission_id": txid}
+                await self.send_frame(target, FRAME_STREAM_OPEN_OK, **response)
+                self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_OK, response)
+                return
+
+        if stream_id in self.retired_stream_ids:
+            if await self.handle_retired_replay(incoming, FRAME_STREAM_OPEN, fields):
+                return
+            self.register_peer_tx(FRAME_STREAM_OPEN, fields)
+            target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            response = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_STATE}
+            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
+            return
+
         stream = self.streams.get(stream_id)
+        if stream is not None and stream.opening_txid is not None and stream.opening_txid != txid:
+            raise TransmissionError("new STREAM_OPEN Transmission conflicts with existing Stream identity")
+        duplicate = self.register_peer_tx(FRAME_STREAM_OPEN, fields)
+        if stream is not None and duplicate and await self.resend_confirmation(incoming, txid):
+            return
         if stream is not None and not duplicate:
             raise TransmissionError("new STREAM_OPEN Transmission conflicts with existing Stream identity")
         if stream is None and len(self.streams) >= self.local_limits.max_streams:
-            reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-            await self.send_frame(
-                reply,
-                FRAME_STREAM_OPEN_REJECT,
-                stream_id=stream_id,
-                transmission_id=txid,
-                error_code=ERROR_STREAM_LIMIT,
-            )
-            self.peer_tx_confirmation[txid] = (
-                FRAME_STREAM_OPEN_REJECT,
-                {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_LIMIT},
-            )
+            target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+            response = {"stream_id": stream_id, "transmission_id": txid, "error_code": ERROR_STREAM_LIMIT}
+            await self.send_frame(target, FRAME_STREAM_OPEN_REJECT, **response)
+            self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_REJECT, response)
+            self.opening_tombstones[stream_id] = {
+                "opening_txid": txid,
+                "decision": "rejected",
+                "opening_decision": "rejected",
+                "error_code": ERROR_STREAM_LIMIT,
+            }
             return
         if stream is None:
             stream = StreamState(stream_id=stream_id, lifecycle="OPEN", accepted=True)
+            stream.opening_txid = txid
             self.streams[stream_id] = stream
             self.trace.emit(
                 "stream_created",
                 session_id=self.session_id.hex() if self.session_id else None,
                 stream_id=stream_id,
             )
-        reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+        target = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+        response = {"stream_id": stream_id, "transmission_id": txid}
+        await self.send_frame(target, FRAME_STREAM_OPEN_OK, **response)
         await self.send_frame(
-            reply,
-            FRAME_STREAM_OPEN_OK,
-            stream_id=stream_id,
-            transmission_id=txid,
-        )
-        await self.send_frame(
-            reply,
+            target,
             FRAME_STREAM_CREDIT,
             stream_id=stream_id,
             consumed_offset=0,
             maximum_offset=stream.local_maximum,
         )
         self.stream_credit_refreshes += 1
-        self.peer_tx_confirmation[txid] = (
-            FRAME_STREAM_OPEN_OK,
-            {"stream_id": stream_id, "transmission_id": txid},
-        )
+        self.peer_tx_confirmation[txid] = (FRAME_STREAM_OPEN_OK, response)
 
     def ensure_byte_identity(self, stream: StreamState, offset: int, data: bytes) -> None:
         new_start = offset
@@ -1224,6 +1377,7 @@ class IndependentSession:
 
     async def handle_stream_data(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
+        self.require_peer_stream_id(stream_id)
         offset = int(fields["offset"])
         txid = int(fields["transmission_id"])
         data = bytes(fields["data"])  # type: ignore[arg-type]
@@ -1240,8 +1394,10 @@ class IndependentSession:
                     self.application_duplicate_bytes_suppressed += len(data)
                 await self.acknowledge(incoming, stream_id, txid, FRAME_STREAM_DATA)
                 return
-            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
-                return
+            if stream_id in self.retired_stream_ids:
+                if await self.handle_retired_replay(incoming, FRAME_STREAM_DATA, fields):
+                    return
+                raise StreamStateError("DATA retired without replay state")
             raise StreamStateError("DATA for unknown Stream")
         if stream.lifecycle in ("OPENING", "OPENING_CANCEL_PENDING") and not stream.accepted:
             raise StreamStateError("DATA arrived before acceptance")
@@ -1316,6 +1472,7 @@ class IndependentSession:
 
     async def handle_stream_fin(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
+        self.require_peer_stream_id(stream_id)
         txid = int(fields["transmission_id"])
         final_offset = int(fields["final_offset"])
         stream = self.streams.get(stream_id)
@@ -1327,8 +1484,10 @@ class IndependentSession:
                 self.register_peer_tx(FRAME_STREAM_FIN, fields)
                 await self.acknowledge(incoming, stream_id, txid, FRAME_STREAM_FIN)
                 return
-            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
-                return
+            if stream_id in self.retired_stream_ids:
+                if await self.handle_retired_replay(incoming, FRAME_STREAM_FIN, fields):
+                    return
+                raise StreamStateError("FIN retired without replay state")
             raise StreamStateError("FIN for unknown Stream")
         if stream.lifecycle == "OPENING" and not stream.accepted:
             if final_offset != 0:
@@ -1374,6 +1533,7 @@ class IndependentSession:
 
     async def handle_reset_stream(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
+        self.require_peer_stream_id(stream_id)
         txid = int(fields["transmission_id"])
         final_offset = int(fields["final_offset"])
         stream = self.streams.get(stream_id)
@@ -1385,8 +1545,17 @@ class IndependentSession:
                 self.register_peer_tx(FRAME_RESET_STREAM, fields)
                 await self.acknowledge(incoming, stream_id, txid, FRAME_RESET_STREAM)
                 return
-            if stream_id in self.retired_stream_ids and txid <= self.peer_retired_through:
+            opening = self.opening_tombstones.get(stream_id)
+            if opening is not None:
+                if final_offset != 0:
+                    raise StreamStateError("pre-open RESET changed zero Final Offset")
+                self.register_peer_tx(FRAME_RESET_STREAM, fields)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_RESET_STREAM)
                 return
+            if stream_id in self.retired_stream_ids:
+                if await self.handle_retired_replay(incoming, FRAME_RESET_STREAM, fields):
+                    return
+                raise StreamStateError("RESET retired without replay state")
             if self.role == "server" and final_offset == 0:
                 self.register_peer_tx(FRAME_RESET_STREAM, fields)
                 self.opening_tombstones[stream_id] = {"decision":"preopen-reset","recv_final":0,"terminal_txid":txid}
@@ -1422,9 +1591,22 @@ class IndependentSession:
 
     async def handle_stop_sending(self, incoming: Carrier, fields: Dict[str, object]) -> None:
         stream_id = int(fields["stream_id"])
+        self.require_peer_stream_id(stream_id)
         txid = int(fields["transmission_id"])
         stream = self.streams.get(stream_id)
         if stream is None:
+            if stream_id in self.tombstones:
+                self.register_peer_tx(FRAME_STOP_SENDING, fields)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+                return
+            if stream_id in self.opening_tombstones:
+                self.register_peer_tx(FRAME_STOP_SENDING, fields)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+                return
+            if stream_id in self.retired_stream_ids:
+                if await self.handle_retired_replay(incoming, FRAME_STOP_SENDING, fields):
+                    return
+                raise StreamStateError("STOP_SENDING retired without replay state")
             if self.role == "server":
                 duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
                 self.opening_tombstones[stream_id] = {"decision":"preopen-stop","terminal_txid":txid}
@@ -1449,14 +1631,18 @@ class IndependentSession:
             receiver_timestamp_us=reply.timestamp_us(),
         )
         stream.stop_received_event.set()
-        if not duplicate and stream.send_terminal_mode != "RESET":
+        closed_direction = stream.send_terminal_mode == "RESET" or (
+            stream.send_terminal_mode == "FIN" and stream.local_terminal_settled
+        )
+        if not duplicate and not closed_direction:
+            reset_final = stream.send_final if stream.send_final is not None else stream.send_offset
             tx = self.alloc_tx(
                 FRAME_RESET_STREAM,
                 stream_id,
-                final_offset=stream.send_offset,
+                final_offset=reset_final,
                 stream_error_code=int(fields["stream_error_code"]),
             )
-            stream.send_final = stream.send_offset
+            stream.send_final = reset_final
             stream.send_terminal_mode = "RESET"
             stream.local_terminal_txid = tx.txid
             stream.stream_error_code = int(fields["stream_error_code"])

@@ -90,6 +90,12 @@ class ProtocolError(Exception):
     pass
 
 
+class FrameTypeProtocolError(ProtocolError):
+    def __init__(self, frame_type: int, message: str) -> None:
+        super().__init__(message)
+        self.frame_type = frame_type
+
+
 class AuthenticationError(ProtocolError):
     pass
 
@@ -561,12 +567,14 @@ def parse_frames(plaintext: bytes, max_frame_payload: int) -> List[Tuple[int, Di
             result.append((ftype, fields))
             if ftype in (FRAME_CARRIER_CLOSE, FRAME_SESSION_CLOSE):
                 terminal = True
-        elif 0x22 <= ftype <= 0x3FFF:
+        elif ftype <= 0x3F:
+            raise FrameTypeProtocolError(ftype, f"unknown Core Frame 0x{ftype:x}")
+        elif ftype <= 0x3FFF:
             pass
         elif ftype <= 0x7FFF:
-            raise ProtocolError("Private Use Frame without profile")
+            raise FrameTypeProtocolError(ftype, "Private Use Frame without negotiated profile")
         else:
-            raise ProtocolError("reserved Frame")
+            raise FrameTypeProtocolError(ftype, "reserved Frame Type")
         pos = stop
     return result
 
@@ -820,6 +828,9 @@ class PeerSession:
         if frame_type == FRAME_STREAM_DATA:
             info["data_length"] = len(fields["data"])  # type: ignore[arg-type]
         self.trace.emit("frame_recv", **info)
+
+        if frame_type == FRAME_PADDING:
+            return
 
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"]); maximum = int(fields["maximum_bytes"])

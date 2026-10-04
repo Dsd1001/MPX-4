@@ -91,6 +91,12 @@ class ProtocolError(Exception):
     pass
 
 
+class FrameTypeProtocolError(ProtocolError):
+    def __init__(self, frame_type: int, message: str) -> None:
+        super().__init__(message)
+        self.frame_type = frame_type
+
+
 class AuthenticationError(ProtocolError):
     pass
 
@@ -589,7 +595,7 @@ def parse_frames(plaintext: bytes, max_frame_payload: int) -> List[Tuple[int, Di
         end = pos + frame_length
         if frame_type <= 0x3F:
             if frame_type not in FRAME_NAMES:
-                raise ProtocolError(f"unknown Core Frame 0x{frame_type:x}")
+                raise FrameTypeProtocolError(frame_type, f"unknown Core Frame 0x{frame_type:x}")
             parsed = parse_frame_body(frame_type, body, max_frame_payload)
             frames.append((frame_type, parsed))
             if frame_type in (FRAME_CARRIER_CLOSE, FRAME_SESSION_CLOSE) and end != len(plaintext):
@@ -598,9 +604,9 @@ def parse_frames(plaintext: bytes, max_frame_payload: int) -> List[Tuple[int, Di
             # Unknown Extension Frames are authenticated and skipped by length.
             pass
         elif frame_type <= 0x7FFF:
-            raise ProtocolError("Private Use Frame without negotiated profile")
+            raise FrameTypeProtocolError(frame_type, "Private Use Frame without negotiated profile")
         else:
-            raise ProtocolError("reserved Frame Type")
+            raise FrameTypeProtocolError(frame_type, "reserved Frame Type")
         pos = end
     return frames
 
@@ -913,6 +919,9 @@ class ReferenceSession:
         if frame_type == FRAME_STREAM_DATA:
             trace_fields["data_length"] = len(fields["data"])  # type: ignore[arg-type]
         self.trace.emit("frame_recv", **trace_fields)
+
+        if frame_type == FRAME_PADDING:
+            return
 
         if frame_type == FRAME_SESSION_CREDIT:
             consumed = int(fields["consumed_bytes"])

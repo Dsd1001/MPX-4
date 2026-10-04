@@ -37,6 +37,12 @@ def session_class(name: str):
     return module.Gate2Session if name == "reference" else module.IndependentSession
 
 
+def core_module(name: str):
+    return importlib.import_module(
+        "reference.mpx4_core" if name == "reference" else "independent.core"
+    )
+
+
 async def expect_case_failure(
     implementation: str,
     case_name: str,
@@ -312,6 +318,227 @@ async def mutation_tombstone_credit_validation_bypassed(implementation: str) -> 
     }
 
 
+async def mutation_padding_not_ignored(implementation: str) -> dict:
+    runtime = runtime_module(implementation)
+    cls = session_class(implementation)
+    original = cls.handle_frame
+
+    async def broken(self, incoming, frame_type, fields):
+        if frame_type == runtime.FRAME_PADDING:
+            raise runtime.ProtocolError("mutated PADDING rejection")
+        return await original(self, incoming, frame_type, fields)
+
+    cls.handle_frame = broken
+    try:
+        observed = await expect_case_failure(implementation, "padding-ignored")
+    finally:
+        cls.handle_frame = original
+    return {
+        "mutation": "padding_not_ignored",
+        "guard_case": "padding-ignored",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_capacity_reject_not_retained(implementation: str) -> dict:
+    cls = session_class(implementation)
+    original = cls.handle_stream_open
+
+    async def broken(self, incoming, fields):
+        await original(self, incoming, fields)
+        stream_id = int(fields["stream_id"])
+        retained = self.opening_tombstones.get(stream_id)
+        if retained is not None and int(retained.get("error_code", -1)) == 0x08:
+            self.opening_tombstones.pop(stream_id, None)
+
+    cls.handle_stream_open = broken
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "capacity-reject-replay",
+            role="server",
+        )
+    finally:
+        cls.handle_stream_open = original
+    return {
+        "mutation": "capacity_reject_not_retained",
+        "guard_case": "capacity-reject-replay",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_opening_decision_not_retained(implementation: str) -> dict:
+    cls = session_class(implementation)
+    original = cls.retire_stream_to_tombstone
+
+    def broken(self, stream_id):
+        tombstone = original(self, stream_id)
+        tombstone["opening_txid"] = None
+        tombstone["opening_decision"] = None
+        return tombstone
+
+    cls.retire_stream_to_tombstone = broken
+    observed = []
+    try:
+        observed.append(
+            await expect_case_failure(
+                implementation,
+                "accepted-open-replay-tombstone",
+                role="server",
+            )
+        )
+        observed.append(
+            await expect_case_failure(
+                implementation,
+                "accepted-open-ok-replay-tombstone",
+                role="client",
+            )
+        )
+    finally:
+        cls.retire_stream_to_tombstone = original
+    return {
+        "mutation": "opening_decision_not_retained",
+        "guard_case": "accepted-open-replay-tombstone",
+        "guard_cases": ["accepted-open-replay-tombstone", "accepted-open-ok-replay-tombstone"],
+        "observed_failures": observed,
+    }
+
+
+async def mutation_unknown_core_not_session_scoped(implementation: str) -> dict:
+    core = core_module(implementation)
+    original = core.parse_frames
+
+    def broken(plaintext, max_frame_payload):
+        try:
+            return original(plaintext, max_frame_payload)
+        except core.FrameTypeProtocolError:
+            return []
+
+    core.parse_frames = broken
+    observed = []
+    try:
+        for role in ("server", "client"):
+            observed.append(
+                await expect_case_failure(
+                    implementation,
+                    "unknown-core-session-scope",
+                    role=role,
+                )
+            )
+    finally:
+        core.parse_frames = original
+    return {
+        "mutation": "unknown_core_not_session_scoped",
+        "guard_case": "unknown-core-session-scope",
+        "observed_failures": observed,
+    }
+
+
+async def mutation_stream_id_parity_bypassed(implementation: str) -> dict:
+    cls = session_class(implementation)
+    helper_name = "validate_peer_stream_id" if implementation == "reference" else "require_peer_stream_id"
+    original = getattr(cls, helper_name)
+
+    def broken(self, stream_id):
+        return None
+
+    setattr(cls, helper_name, broken)
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "invalid-preopen-stop-id",
+            role="server",
+        )
+    finally:
+        setattr(cls, helper_name, original)
+    return {
+        "mutation": "stream_id_parity_bypassed",
+        "guard_case": "invalid-preopen-stop-id",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_conflicting_open_reject_ignored(implementation: str) -> dict:
+    runtime = runtime_module(implementation)
+    cls = session_class(implementation)
+    original = cls.handle_frame
+
+    async def broken(self, incoming, frame_type, fields):
+        if frame_type == runtime.FRAME_STREAM_OPEN_REJECT:
+            stream_id = int(fields["stream_id"])
+            if stream_id not in self.streams and stream_id in self.opening_tombstones:
+                return
+        return await original(self, incoming, frame_type, fields)
+
+    cls.handle_frame = broken
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "conflicting-open-reject",
+            role="client",
+        )
+    finally:
+        cls.handle_frame = original
+    return {
+        "mutation": "conflicting_open_reject_ignored",
+        "guard_case": "conflicting-open-reject",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_terminal_tombstone_stop_reopens(implementation: str) -> dict:
+    cls = session_class(implementation)
+    original = cls.handle_stop_sending
+
+    async def broken(self, incoming, fields):
+        stream_id = int(fields["stream_id"])
+        tombstone = self.tombstones.pop(stream_id, None)
+        try:
+            return await original(self, incoming, fields)
+        finally:
+            if tombstone is not None:
+                self.tombstones[stream_id] = tombstone
+
+    cls.handle_stop_sending = broken
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "late-stop-tombstone",
+            role="server",
+        )
+    finally:
+        cls.handle_stop_sending = original
+    return {
+        "mutation": "terminal_tombstone_stop_reopens",
+        "guard_case": "late-stop-tombstone",
+        "observed_failure": observed,
+    }
+
+
+async def mutation_retired_confirmation_replay_bypassed(implementation: str) -> dict:
+    cls = session_class(implementation)
+    helper_name = "replay_retired_reliable" if implementation == "reference" else "handle_retired_replay"
+    original = getattr(cls, helper_name)
+
+    async def broken(self, incoming, frame_type, fields):
+        return False
+
+    setattr(cls, helper_name, broken)
+    try:
+        observed = await expect_case_failure(
+            implementation,
+            "retired-fin-confirmation-replay",
+            role="server",
+        )
+    finally:
+        setattr(cls, helper_name, original)
+    return {
+        "mutation": "retired_confirmation_replay_bypassed",
+        "guard_case": "retired-fin-confirmation-replay",
+        "observed_failure": observed,
+    }
+
+
 MUTATIONS: List[Callable[[str], Awaitable[dict]]] = [
     mutation_fail_session_noop,
     mutation_crossed_credit_accepted,
@@ -321,6 +548,14 @@ MUTATIONS: List[Callable[[str], Awaitable[dict]]] = [
     mutation_overlap_reassembly_exact_offset_only,
     mutation_terminal_credit_final_check_bypassed,
     mutation_tombstone_credit_validation_bypassed,
+    mutation_padding_not_ignored,
+    mutation_capacity_reject_not_retained,
+    mutation_opening_decision_not_retained,
+    mutation_unknown_core_not_session_scoped,
+    mutation_stream_id_parity_bypassed,
+    mutation_conflicting_open_reject_ignored,
+    mutation_terminal_tombstone_stop_reopens,
+    mutation_retired_confirmation_replay_bypassed,
 ]
 
 
