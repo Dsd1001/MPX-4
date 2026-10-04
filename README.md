@@ -90,6 +90,14 @@ Draft 11 is a freeze-preparation revision: it adds no scheduler or Relay topolog
 
 Test vectors and conformance cases are intended to let independent implementations verify identical wire encodings, authenticated handshake derivations, lifecycle behavior, Carrier Generation semantics, MAX_CARRIERS negotiation, active logical Carrier accounting, DORMANT recovery, Protocol Version isolation, handshake rejection, identifier exhaustion, local Carrier-selection invariants, and failure scope.
 
+### Executable reference and Gate 1 harness
+
+- [Draft 11 executable reference endpoint and harness](reference/README.md)
+
+The `reference/` implementation runs a real TCP Client and Server as separate processes, uses fresh handshake randomness, exchanges authenticated Secure Records, and exercises the current Gate 1 subset with 16 concurrent Streams and 1 MiB of application data in each direction. The harness independently checks application bytes, credit-before-DATA ordering, and local-event full-duplex overlap. A transport fault proxy supports deterministic TCP byte fragmentation, delay/backpressure, and connection abort scaffolding.
+
+A reference-to-reference PASS is integration evidence only. It is not independent implementation A/B interoperability, does not yet cover the complete A-L Mandatory profile, and does not establish Protocol Version 4 stability.
+
 ## Extension points
 
 - [Protocol extensions](extensions/README.md)
@@ -112,7 +120,7 @@ Permanent assignments are maintained in [REGISTRIES.md](REGISTRIES.md).
 
 ## Repository validation
 
-The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, wire-derived handshake limits, direction-bound Secure Record keys/IVs, Core Frame body legality, close-last ordering, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, and mutation checks that also run under Python optimization.
+The repository includes fail-closed executable validation for JSON safety, links, registries, positive and negative VarInts, full Frame field/wire round-trips, handshake cryptography, wire-derived handshake limits, direction-bound Secure Record keys/IVs, Core Frame body legality, negotiated MAX_FRAME_PAYLOAD, close Reason length and close-last ordering, input-driven lifecycle/recovery/error-scope oracles, confirmation-type rules, complete Core Frame coverage, generated TCP fixtures, mutation checks that also run under Python optimization, a canonical-vector reference self-test, and real-TCP Gate 1 integration.
 
 Validation tooling supports Python 3.11 and 3.12 and requires `cryptography>=42,<47`. GitHub Actions runs the full suite on both Python versions. `tools/validate.py` uses exit status 2 for conformance/vector validation failures; unexpected runtime or tooling failures use a different non-zero exit. `tools/mutation_test.py` first requires an unchanged baseline PASS in ordinary and optimized mode and accepts only the explicit validation-failure status for a mutation.
 
@@ -120,6 +128,9 @@ Validation tooling supports Python 3.11 and 3.12 and requires `cryptography>=42,
     python tools/validate.py
     python -O tools/validate.py
     python tools/mutation_test.py
+    python -m reference.selftest
+    python reference/interop_harness.py --out-dir /tmp/mpx4-gate1
+    python reference/interop_harness.py --out-dir /tmp/mpx4-gate1-fragmented --case-id gate1-proxy-fragmented --write-chunk 257 --proxy-max-chunk 1024
 
 GitHub Actions runs the same checks on pushes and pull requests. Protocol integers beyond the JavaScript safe-integer range are represented as decimal strings in JSON vectors.
 
@@ -185,6 +196,13 @@ Security-sensitive reports should follow [SECURITY.md](SECURITY.md).
     │   ├── validate.py
     │   ├── semantic_validation.py
     │   └── mutation_test.py
+    ├── reference/
+    │   ├── README.md
+    │   ├── mpx4_core.py
+    │   ├── endpoint.py
+    │   ├── interop_harness.py
+    │   ├── fault_proxy.py
+    │   └── selftest.py
     └── .github/
         ├── workflows/
         │   └── validate.yml

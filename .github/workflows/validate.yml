@@ -26,5 +26,11 @@ jobs:
         run: python -O tools/validate.py
       - name: Mutation tests
         run: python tools/mutation_test.py
+      - name: Anchor executable reference to canonical vectors
+        run: python -m reference.selftest
+      - name: Reference Gate 1 real-TCP integration
+        run: python reference/interop_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate1"
+      - name: Reference Gate 1 fragmented TCP integration
+        run: python reference/interop_harness.py --out-dir "$RUNNER_TEMP/mpx4-gate1-fragmented" --case-id gate1-proxy-fragmented --write-chunk 257 --proxy-max-chunk 1024
       - name: Ensure generated files are committed
         run: git diff --exit-code

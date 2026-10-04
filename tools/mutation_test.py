@@ -199,6 +199,30 @@ def mutate_record_incomplete_frame(repo):
     p,d=load(repo,'secure-record.json'); reencrypt_record(d,plain=b'\x01'); save(p,d)
 
 
+def mutate_record_stream_data_over_frame_payload(repo):
+    p,d=load(repo,'secure-record.json')
+    data=b'x'*32769
+    body=vi(1)+vi(0)+vi(1)+data
+    plain=vi(0x13)+vi(len(body))+body
+    reencrypt_record(d,plain=plain); save(p,d)
+
+
+def mutate_record_close_reason_257(repo):
+    p,d=load(repo,'secure-record.json')
+    reason=b'r'*257
+    body=vi(0)+vi(0)+vi(len(reason))+reason
+    plain=vi(0x03)+vi(len(body))+body
+    reencrypt_record(d,plain=plain); save(p,d)
+
+
+def mutate_record_close_reason_invalid_utf8(repo):
+    p,d=load(repo,'secure-record.json')
+    reason=b'\xff'
+    body=vi(0)+vi(0)+vi(len(reason))+reason
+    plain=vi(0x03)+vi(len(body))+body
+    reencrypt_record(d,plain=plain); save(p,d)
+
+
 def mutate_state_below_final_still_error(repo):
     p,d=load(repo,'state-validity.json')
     c=next(x for x in d['cases'] if x['name']=='data-beyond-fin')
@@ -273,6 +297,22 @@ def positive_record_valid_ping(repo):
     p,d=load(repo,'secure-record.json')
     reencrypt_record(d,plain=b'\x01\x01\x01')
     save(p,d)
+
+
+def positive_record_max_stream_data(repo):
+    p,d=load(repo,'secure-record.json')
+    data=b'x'*32768
+    body=vi(1)+vi(0)+vi(1)+data
+    plain=vi(0x13)+vi(len(body))+body
+    reencrypt_record(d,plain=plain); save(p,d)
+
+
+def positive_record_max_close_reason(repo):
+    p,d=load(repo,'secure-record.json')
+    reason=b'r'*256
+    body=vi(0)+vi(0)+vi(len(reason))+reason
+    plain=vi(0x03)+vi(len(body))+body
+    reencrypt_record(d,plain=plain); save(p,d)
 
 
 def positive_record_max_padding(repo):
@@ -496,6 +536,9 @@ def main():
         ('record-oversize-plaintext',mutate_record_oversize,True,False),
         ('record-sequence-key-limit',mutate_record_sequence_exhausted,True,False),
         ('record-incomplete-frame',mutate_record_incomplete_frame,True,False),
+        ('record-stream-data-over-max-frame-payload',mutate_record_stream_data_over_frame_payload,True,False),
+        ('record-close-reason-257',mutate_record_close_reason_257,True,False),
+        ('record-close-reason-invalid-utf8',mutate_record_close_reason_invalid_utf8,True,False),
         ('record-wrong-direction-key',mutate_record_wrong_direction_key,False,False),
         ('decoded-record-limit-overrides-wire',mutate_decoded_record_limit_override,True,False),
         ('record-ping-missing-token',mutate_record_ping_missing_token,True,False),
@@ -537,6 +580,8 @@ def main():
     require_baseline()
     positives=[
         ('valid-ping-record',positive_record_valid_ping,True),
+        ('valid-max-stream-data-record',positive_record_max_stream_data,True),
+        ('valid-max-close-reason-record',positive_record_max_close_reason,True),
         ('valid-max-padding-record',positive_record_max_padding,True),
         ('valid-server-direction-records',positive_record_server_direction,True),
         ('same-named-state-case-with-legal-input',positive_named_state_case_made_legal,False),

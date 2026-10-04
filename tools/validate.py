@@ -166,7 +166,7 @@ def frame_body_from_fields(name, fields):
         return i('error_code') + i('trigger_frame_type') + vi_enc(len(reason)) + reason
     raise ValidationError(f'no validator body schema for {name}')
 
-def decode_body(name, body):
+def decode_body(name, body, max_frame_payload=None):
     pos = 0
 
     def get(k):
@@ -188,7 +188,11 @@ def decode_body(name, body):
         get('stream_id')
         get('offset')
         get('transmission_id')
-        out['data_hex'] = body[pos:].hex()
+        data = body[pos:]
+        check(len(data) >= 1, 'STREAM_DATA Data must be non-empty')
+        if max_frame_payload is not None:
+            check(len(data) <= max_frame_payload, ('STREAM_DATA exceeds peer MAX_FRAME_PAYLOAD', len(data), max_frame_payload))
+        out['data_hex'] = data.hex()
         pos = len(body)
     elif name == 'TRANSMISSION_ACK':
         get('stream_id')
@@ -231,7 +235,11 @@ def decode_body(name, body):
         pos = pos2
         if pos + ln > len(body):
             raise ValidationError(f'truncated reason in {name}')
-        out['reason_utf8'] = body[pos:pos + ln].decode('utf-8')
+        check(ln <= 256, (name, 'Reason exceeds 256 UTF-8 octets', ln))
+        try:
+            out['reason_utf8'] = body[pos:pos + ln].decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValidationError(f'invalid UTF-8 reason in {name}') from exc
         pos += ln
     else:
         raise ValidationError(f'no decoder schema for {name}')
@@ -360,7 +368,7 @@ def _handshake_context(cp, sp, decoded):
     }
 
 
-def validate_record_plaintext(pt, registry):
+def validate_record_plaintext(pt, registry, max_frame_payload):
     check(len(pt) >= 1, 'Secure Record plaintext must be non-empty')
     pos = 0
     reverse = {v: k for k, v in registry.items()}
@@ -373,7 +381,7 @@ def validate_record_plaintext(pt, registry):
         if frame_type <= 0x3f:
             check(frame_type in reverse, ('unknown Core Frame in Secure Record', frame_type))
             name=reverse[frame_type]
-            decode_body(name,body)
+            decode_body(name, body, max_frame_payload=max_frame_payload)
             if name in {'CARRIER_CLOSE','SESSION_CLOSE'}:
                 check(frame_end == len(pt), (name,'must be final Frame in Secure Record'))
         elif frame_type <= 0x3fff:
@@ -478,7 +486,7 @@ def handshake_crypto_records(root):
         clen = int(rec['ciphertext_length'])
         check(clen == len(pt), 'validation check failed')
         check(1 <= clen <= peer_max_record_size, ('Ciphertext Length outside peer MAX_RECORD_SIZE', clen, peer_max_record_size))
-        validate_record_plaintext(pt, frame_registry)
+        validate_record_plaintext(pt, frame_registry, peer_limits['max_frame_payload'])
         clen_vi = vi_enc(clen)
         check(rec['ciphertext_length_varint_hex'] == clen_vi.hex(), 'validation check failed')
         aad = flags + clen_vi

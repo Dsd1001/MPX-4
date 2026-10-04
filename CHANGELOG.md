@@ -40,7 +40,7 @@ Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cr
 - Removes protocol-validator dependence on Python assert so checks remain active under python -O.
 - Follow-up conformance hardening executes all 42 declared Stream/state validity cases from their state, Frame, conditions, expected result, error, and response fields; unknown combinations fail closed.
 - Terminal flow-control vectors distinguish previous authenticated End Offset, previous commitment, and established final size, including lower-Final-Offset and duplicate/no-new-commitment cases.
-- Secure Record validation separately enforces protocol legality (`1 <= Ciphertext Length <= peer MAX_RECORD_SIZE`, complete Frame boundaries, valid Core/extension ranges, and sequence number below `2^24`) in addition to AEAD consistency.
+- Secure Record validation separately enforces protocol legality (`1 <= Ciphertext Length <= peer MAX_RECORD_SIZE`, complete Frame boundaries, valid Core/extension ranges, negotiated `MAX_FRAME_PAYLOAD`, close Reason <= 256 UTF-8 octets, and sequence number below `2^24`) in addition to AEAD consistency.
 - Secure Record validation now derives directional receive limits from the authenticated CLIENT_INIT/SERVER_INIT wire, cross-checks decoded fixture metadata, selects the direction-matching traffic key/IV, decodes every known Core Frame body, and enforces CARRIER_CLOSE/SESSION_CLOSE as record-final Frames.
 - Opening decisions in OPENING and OPENING_CANCEL_PENDING share the same Stream/Transmission identity validation; recovery progress checks terminal Session state explicitly; retired reliable Frames require retirement coverage or retained confirmation replay state.
 - Legacy case-name-only state assertions were removed so the input-driven state evaluator is the single authority for state-validity cases.
@@ -51,6 +51,16 @@ Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cr
 - Executes semantic handlers for the previously metadata-only MAX_CARRIERS, Session lifecycle, version compatibility, HANDSHAKE_REJECT, identity lifecycle, Carrier Generation, and error-scope vectors.
 - Expands Core Frame vectors to PADDING, PONG, CARRIER_CLOSE, and SESSION_CLOSE, making all 18 assigned Core Frame types executable.
 - Adds recovery, terminal-flow-control, Transmission-allocation, and close-ordering vectors plus matching mutation coverage.
+- Gate 0 mutation coverage now includes exact-boundary positive controls for 32768-octet STREAM_DATA and 256-octet close Reason plus negative 32769/257 cases.
+
+### Executable reference and interoperability evidence
+
+- Adds a deliberately small Draft 11 Core-over-TCP reference Client/Server that is independent from the specification validator and uses real sockets, fresh handshake randomness, Finished authentication, AES-GCM Secure Records, explicit Session/Stream credit, reliable DATA/FIN confirmation, and SESSION_CLOSE.
+- Adds a canonical-vector self-test so reference-to-reference runtime success cannot rely only on a shared implementation bug in handshake/crypto encoding.
+- Adds a Gate 1 process harness that launches Client and Server separately, verifies per-Stream application bytes/digests, credit-before-DATA ordering, 16 simultaneous Streams, 1 MiB in each direction, and full-duplex overlap using each endpoint's own event order rather than cross-clock subtraction.
+- Adds a TCP fault-proxy scaffold for deterministic byte fragmentation, delay/backpressure, and connection abort. The proxy does not model UDP-style Record dropping on an ordered TCP Carrier.
+- CI runs both direct and fragmented-proxy Gate 1 integration on Python 3.11 and 3.12.
+- These results are reference-to-reference integration evidence only; they do not claim complete A-L Mandatory coverage, independent A/B interoperability, or Protocol Version 4 stability.
 
 ### Compatibility
 
