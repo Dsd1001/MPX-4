@@ -696,6 +696,7 @@ class Carrier:
         self.write_chunk = write_chunk
         self.send_seq = 0
         self.recv_seq = 0
+        self.output_usable = True
         self.write_lock = asyncio.Lock()
         self.session_epoch_ns = time.monotonic_ns()
 
@@ -734,6 +735,8 @@ class Carrier:
         if not 1 <= len(plaintext) <= self.peer_limits.max_record_size:
             raise ProtocolError("Secure Record plaintext outside peer MAX_RECORD_SIZE")
         async with self.write_lock:
+            if not self.output_usable:
+                raise ConnectionError("Carrier ordered output is no longer usable")
             if self.send_seq >= MAX_KEY_RECORDS:
                 raise ProtocolError("traffic key Record limit exhausted")
             seq = self.send_seq
@@ -741,8 +744,31 @@ class Carrier:
             nonce = xor_nonce(self.send_iv, seq)
             encrypted = AESGCM(self.send_key).encrypt(nonce, plaintext, header)
             wire = header + encrypted
-            await self.write_bytes(wire)
-            self.send_seq += 1
+            committed = False
+            try:
+                if self.write_chunk and self.write_chunk > 0:
+                    for i in range(0, len(wire), self.write_chunk):
+                        self.writer.write(wire[i : i + self.write_chunk])
+                        committed = True
+                else:
+                    self.writer.write(wire)
+                    committed = True
+                # The complete serialized Record is now committed to this
+                # Carrier's ordered output. Consume the implicit sequence
+                # number before the first cancellation point.
+                self.send_seq = seq + 1
+                await self.writer.drain()
+            except BaseException:
+                if committed:
+                    # After any post-commit failure/cancellation we cannot
+                    # prove whether all committed bytes reached the peer. The
+                    # Carrier therefore cannot safely emit another Record.
+                    self.output_usable = False
+                    try:
+                        self.writer.close()
+                    except Exception:
+                        pass
+                raise
         info = self.base_trace()
         info.update(
             {

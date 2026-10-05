@@ -98,6 +98,7 @@ STREAM_CREDIT_WINDOW_LIMIT = 16 * 1024 * 1024
 SESSION_CREDIT_WINDOW_LIMIT = 128 * 1024 * 1024
 
 STREAM_REASON_TEST = 0x09
+CANDIDATE_HANDSHAKE_TIMEOUT = 5.0
 
 SCENARIOS = (
     "multi-carrier-reinjection",
@@ -238,10 +239,12 @@ class Gate2Session:
         self.state = "NEW"
         self.state_history: List[str] = ["NEW"]
         self.carriers: Dict[int, Carrier] = {}
+        self.active_logical_ids: Set[int] = set()
         self.carrier_tasks: Dict[Tuple[int, int], asyncio.Task[None]] = {}
         self.highest_accepted: Dict[int, int] = {}
         self.highest_attempted: Dict[int, int] = {}
-        self.pending_candidates: Set[Tuple[int, int]] = set()
+        self.pending_candidates: Dict[Tuple[int, int], int] = {}
+        self.max_pending_candidates = max(8, min(256, local_limits.max_carriers * 4))
         self.established_incarnations: List[Tuple[int, int]] = []
         self.lost_incarnations: List[Tuple[int, int]] = []
         self.ambiguous_attempts: List[Tuple[int, int]] = []
@@ -256,6 +259,7 @@ class Gate2Session:
         self.local_tx: Dict[int, TxState] = {}
         self.settled_through = 0
         self.last_retire_advertised = 0
+        self.retire_task: Optional[asyncio.Task[None]] = None
         self.peer_tx_semantics: Dict[int, Tuple[object, ...]] = {}
         self.peer_tx_confirmation: Dict[int, Tuple[int, Dict[str, object]]] = {}
         self.peer_processed: Set[int] = set()
@@ -297,7 +301,7 @@ class Gate2Session:
             "session_state",
             session_id=self.session_id.hex() if self.session_id else None,
             state=state,
-            active_carriers=len(self.carriers),
+            active_carriers=len(self.active_logical_ids),
             **extra,
         )
 
@@ -308,6 +312,22 @@ class Gate2Session:
             and a.max_streams == b.max_streams
             and a.max_carriers == b.max_carriers
         )
+
+    def carrier_is_current(self, carrier: Carrier, *, require_output: bool = False) -> bool:
+        current = self.carriers.get(carrier.carrier_id)
+        if current is not carrier:
+            return False
+        if self.highest_accepted.get(carrier.carrier_id) != carrier.generation:
+            return False
+        if carrier.carrier_id not in self.active_logical_ids:
+            return False
+        if require_output and not carrier.output_usable:
+            return False
+        return True
+
+    def require_current_carrier(self, carrier: Carrier) -> None:
+        if not self.carrier_is_current(carrier, require_output=True):
+            raise RuntimeError("Carrier is not the current writable incarnation")
 
     def validate_server_candidate(self, init) -> None:
         if self.dormant_retired and init.session_action == 1:
@@ -329,8 +349,8 @@ class Gate2Session:
             raise CandidateReject(ERROR_SESSION_CONFLICT, "JOIN client limits changed")
 
         current_highest = self.highest_accepted.get(init.carrier_id)
-        current_active = init.carrier_id in self.carriers
-        active_count = len(self.carriers)
+        current_active = init.carrier_id in self.active_logical_ids
+        active_count = len(self.active_logical_ids)
         limit = self.effective_carrier_limit or 0
 
         if current_highest is None:
@@ -345,12 +365,18 @@ class Gate2Session:
                 raise CandidateReject(ERROR_RESOURCE_LIMIT, "inactive replacement requires free Carrier slot")
 
     def reserve_candidate(self, init) -> None:
-        if any(cid == init.carrier_id and gen >= init.generation for cid, gen in self.pending_candidates):
-            raise CandidateReject(ERROR_CARRIER_CONFLICT, "equal/stale candidate already pending")
-        self.pending_candidates.add((init.carrier_id, init.generation))
+        if sum(self.pending_candidates.values()) >= self.max_pending_candidates:
+            raise CandidateReject(ERROR_RESOURCE_LIMIT, "too many incomplete Carrier handshakes")
+        key = (init.carrier_id, init.generation)
+        self.pending_candidates[key] = self.pending_candidates.get(key, 0) + 1
 
     def release_candidate(self, carrier_id: int, generation: int) -> None:
-        self.pending_candidates.discard((carrier_id, generation))
+        key = (carrier_id, generation)
+        count = self.pending_candidates.get(key, 0)
+        if count <= 1:
+            self.pending_candidates.pop(key, None)
+        else:
+            self.pending_candidates[key] = count - 1
 
     def should_drop_server_finished(self, carrier_id: int, generation: int) -> bool:
         if self.role != "server" or self.scenario != "ambiguous-replacement":
@@ -364,6 +390,13 @@ class Gate2Session:
         return False
 
     def commit_server_candidate(self, init, protocol_version: int = VERSION) -> None:
+        if self.protocol_version is not None and protocol_version != self.protocol_version:
+            raise CandidateReject(ERROR_SESSION_CONFLICT, "candidate Protocol Version differs from Session")
+        # INIT-time checks are provisional. Authentication completion is the
+        # establishment commit point, so all Session-owned invariants are
+        # re-evaluated against the latest state here without any await.
+        self.validate_server_candidate(init)
+
         if init.session_action == 0:
             self.session_id = init.session_id
             self.protocol_version = protocol_version
@@ -374,21 +407,67 @@ class Gate2Session:
                 init.client_limits.max_carriers,
                 self.local_limits.max_carriers,
             )
-            self.set_state("CREATING")
+
+        old = self.carriers.get(init.carrier_id)
+        if old is not None and old.generation < init.generation:
+            old.output_usable = False
+            try:
+                old.writer.close()
+            except Exception:
+                pass
+            self.trace.emit(
+                "carrier_superseded",
+                session_id=init.session_id.hex(),
+                carrier_id=init.carrier_id,
+                old_generation=old.generation,
+                new_generation=init.generation,
+            )
+
         self.highest_accepted[init.carrier_id] = init.generation
+        self.active_logical_ids.add(init.carrier_id)
+        self.set_state("ACTIVE")
         self.trace.emit(
             "candidate_committed",
             session_id=init.session_id.hex(),
             carrier_id=init.carrier_id,
             generation=init.generation,
             session_action="CREATE" if init.session_action == 0 else "JOIN",
+            active_carriers=len(self.active_logical_ids),
         )
+
+    def committed_candidate_lost(self, carrier_id: int, generation: int, reason: str) -> None:
+        if self.highest_accepted.get(carrier_id) != generation:
+            return
+        self.active_logical_ids.discard(carrier_id)
+        self.lost_incarnations.append((carrier_id, generation))
+        self.trace.emit(
+            "carrier_lost",
+            session_id=self.session_id.hex() if self.session_id else None,
+            carrier_id=carrier_id,
+            generation=generation,
+            reason=reason,
+            active_carriers=len(self.active_logical_ids),
+        )
+        if not self.active_logical_ids and self.state not in {"CLOSING", "CLOSED"}:
+            self.set_state("DORMANT", reason=reason)
 
     async def add_carrier(self, carrier: Carrier, accepted_locally: bool = True) -> None:
         if self.session_id is None:
             self.session_id = carrier.session_id
+        if accepted_locally:
+            highest = self.highest_accepted.get(carrier.carrier_id)
+            if highest is not None and carrier.generation <= highest:
+                raise RuntimeError("local Carrier commit would reuse stale/equal Generation")
+            if carrier.carrier_id not in self.active_logical_ids:
+                limit = self.effective_carrier_limit or self.local_limits.max_carriers
+                if len(self.active_logical_ids) >= limit:
+                    raise RuntimeError("local Carrier commit would exceed Effective Carrier Limit")
+            self.highest_accepted[carrier.carrier_id] = carrier.generation
+            self.active_logical_ids.add(carrier.carrier_id)
+
         old = self.carriers.get(carrier.carrier_id)
         if old is not None and old.generation < carrier.generation:
+            old.output_usable = False
             self.trace.emit(
                 "carrier_superseded",
                 session_id=self.session_id.hex(),
@@ -396,18 +475,16 @@ class Gate2Session:
                 old_generation=old.generation,
                 new_generation=carrier.generation,
             )
-            await self._close_writer(old)
+            old.writer.close()
             self.carriers.pop(carrier.carrier_id, None)
 
         self.carriers[carrier.carrier_id] = carrier
-        if accepted_locally:
-            self.highest_accepted[carrier.carrier_id] = carrier.generation
         self.established_incarnations.append((carrier.carrier_id, carrier.generation))
         self.set_state("ACTIVE")
         self.trace.emit(
             "carrier_established",
             **carrier.base_trace(),
-            active_carriers=len(self.carriers),
+            active_carriers=len(self.active_logical_ids),
             send_record_seq=carrier.send_seq,
             recv_record_seq=carrier.recv_seq,
         )
@@ -433,11 +510,7 @@ class Gate2Session:
             maximum=self.session_local_maximum,
         )
         if self.settled_through > 0:
-            await self.send_frame(
-                carrier,
-                FRAME_TRANSMISSION_RETIRE,
-                retired_through=self.settled_through,
-            )
+            await self.send_retire(carrier)
             self.trace.emit(
                 "recovery_refresh",
                 **carrier.base_trace(),
@@ -464,34 +537,51 @@ class Gate2Session:
         current = self.carriers.get(carrier.carrier_id)
         if current is None or current.generation != carrier.generation:
             return
+        if self.highest_accepted.get(carrier.carrier_id) != carrier.generation:
+            return
         self.carriers.pop(carrier.carrier_id, None)
+        self.active_logical_ids.discard(carrier.carrier_id)
         self.lost_incarnations.append((carrier.carrier_id, carrier.generation))
         self.trace.emit(
             "carrier_lost",
             **carrier.base_trace(),
             reason=reason,
-            active_carriers=len(self.carriers),
+            active_carriers=len(self.active_logical_ids),
         )
-        if not self.carriers and self.state not in {"CLOSING", "CLOSED"}:
+        if not self.active_logical_ids and self.state not in {"CLOSING", "CLOSED"}:
             self.set_state("DORMANT", reason=reason)
         self.carrier_change_event.set()
         self.carrier_change_event = asyncio.Event()
 
     def choose_carrier(self, preferred: Optional[int] = None, exclude: Optional[int] = None) -> Carrier:
         if preferred is not None and preferred in self.carriers:
-            return self.carriers[preferred]
-        ids = sorted(cid for cid in self.carriers if cid != exclude)
+            candidate = self.carriers[preferred]
+            if self.carrier_is_current(candidate, require_output=True):
+                return candidate
+        ids = sorted(
+            cid for cid, carrier in self.carriers.items()
+            if cid != exclude and self.carrier_is_current(carrier, require_output=True)
+        )
         if not ids:
-            ids = sorted(self.carriers)
+            ids = sorted(
+                cid for cid, carrier in self.carriers.items()
+                if self.carrier_is_current(carrier, require_output=True)
+            )
         if not ids:
-            raise RuntimeError("no active Carrier")
+            raise RuntimeError("no active writable Carrier")
         return self.carriers[ids[0]]
 
     def alternate_carrier(self, incoming: Carrier) -> Carrier:
         return self.choose_carrier(exclude=incoming.carrier_id)
 
     async def send_frame(self, carrier: Carrier, frame_type: int, **fields: object) -> None:
-        await carrier.send_frame(frame_type, **fields)
+        self.require_current_carrier(carrier)
+        try:
+            await carrier.send_frame(frame_type, **fields)
+        except BaseException:
+            if not carrier.output_usable and self.carrier_is_current(carrier):
+                asyncio.create_task(self.on_carrier_lost(carrier, "ordered-output-failure"))
+            raise
         info = carrier.base_trace()
         info["frame_type"] = FRAME_NAMES.get(frame_type, f"0x{frame_type:x}")
         for key in (
@@ -596,11 +686,53 @@ class Gate2Session:
             transmission_id=txid,
             confirmation=confirmation,
         )
+        previous_settled = self.settled_through
         while True:
             nxt = self.local_tx.get(self.settled_through + 1)
             if nxt is None or not nxt.settled:
                 break
             self.settled_through += 1
+        if self.settled_through > previous_settled:
+            self.schedule_retire_advertisement()
+
+    def schedule_retire_advertisement(self) -> None:
+        if self.settled_through <= self.last_retire_advertised:
+            return
+        if self.state in {"CLOSING", "CLOSED"}:
+            return
+        if self.retire_task is not None and not self.retire_task.done():
+            return
+        try:
+            self.choose_carrier()
+        except RuntimeError:
+            return
+        self.retire_task = asyncio.create_task(self._drive_retire_advertisement())
+
+    async def _drive_retire_advertisement(self) -> None:
+        try:
+            while (
+                self.state not in {"CLOSING", "CLOSED"}
+                and self.last_retire_advertised < self.settled_through
+            ):
+                try:
+                    carrier = self.choose_carrier()
+                except RuntimeError:
+                    return
+                try:
+                    await self.send_retire(carrier)
+                except (ConnectionError, BrokenPipeError, RuntimeError):
+                    return
+        finally:
+            self.retire_task = None
+            if (
+                self.state not in {"CLOSING", "CLOSED"}
+                and self.last_retire_advertised < self.settled_through
+            ):
+                try:
+                    self.choose_carrier()
+                except RuntimeError:
+                    return
+                self.schedule_retire_advertisement()
 
     def peer_semantic(self, frame_type: int, fields: Dict[str, object]) -> Tuple[object, ...]:
         items = []
@@ -730,10 +862,12 @@ class Gate2Session:
 
     async def receive_loop(self, carrier: Carrier) -> None:
         try:
-            while self.state not in {"CLOSING", "CLOSED"}:
+            while self.state not in {"CLOSING", "CLOSED"} and self.carrier_is_current(carrier):
                 try:
                     frames = await carrier.recv_record()
                 except AuthenticationError as exc:
+                    if not self.carrier_is_current(carrier):
+                        return
                     await self.fail_carrier(
                         carrier,
                         ERROR_AUTHENTICATION_FAILED,
@@ -743,6 +877,8 @@ class Gate2Session:
                     )
                     return
                 except FrameTypeProtocolError as exc:
+                    if not self.carrier_is_current(carrier):
+                        return
                     await self.fail_session(
                         ERROR_PROTOCOL_VIOLATION,
                         exc.frame_type,
@@ -751,6 +887,8 @@ class Gate2Session:
                     )
                     return
                 except ProtocolError as exc:
+                    if not self.carrier_is_current(carrier):
+                        return
                     await self.fail_carrier(
                         carrier,
                         ERROR_FRAME_ENCODING,
@@ -762,8 +900,11 @@ class Gate2Session:
 
                 if self.state in {"CLOSING", "CLOSED"}:
                     return
+                if not self.carrier_is_current(carrier):
+                    self.trace.emit("superseded_record_discarded", **carrier.base_trace())
+                    return
                 for frame_type, fields in frames:
-                    if self.state in {"CLOSING", "CLOSED"}:
+                    if self.state in {"CLOSING", "CLOSED"} or not self.carrier_is_current(carrier):
                         return
                     try:
                         await self.handle_frame(carrier, frame_type, fields)
@@ -802,7 +943,7 @@ class Gate2Session:
                             f"PROTOCOL_VIOLATION: {exc}",
                             carrier,
                         )
-                    if self.state in {"CLOSING", "CLOSED"}:
+                    if self.state in {"CLOSING", "CLOSED"} or not self.carrier_is_current(carrier):
                         return
         except asyncio.IncompleteReadError:
             await self.on_carrier_lost(carrier, "transport-eof")
@@ -817,8 +958,7 @@ class Gate2Session:
         reason: str,
         report: bool,
     ) -> None:
-        current = self.carriers.get(carrier.carrier_id)
-        if current is None or current.generation != carrier.generation:
+        if not self.carrier_is_current(carrier):
             return
         if report:
             try:
@@ -852,8 +992,11 @@ class Gate2Session:
             return
         self.set_state("CLOSING", error_code=error_code)
         carrier = preferred_carrier
-        if carrier is None or carrier.carrier_id not in self.carriers:
-            carrier = self.choose_carrier() if self.carriers else None
+        if carrier is None or not self.carrier_is_current(carrier, require_output=True):
+            try:
+                carrier = self.choose_carrier()
+            except RuntimeError:
+                carrier = None
         if carrier is not None:
             try:
                 await self.send_frame(
@@ -876,6 +1019,7 @@ class Gate2Session:
         for item in carriers:
             await self._close_writer(item)
         self.carriers.clear()
+        self.active_logical_ids.clear()
         self.set_state("CLOSED")
         self.done_event.set()
 
@@ -1335,6 +1479,7 @@ class Gate2Session:
             for carrier in carriers:
                 await self._close_writer(carrier)
             self.carriers.clear()
+            self.active_logical_ids.clear()
             self.set_state("CLOSED")
             self.done_event.set()
             return
@@ -1825,6 +1970,13 @@ class Gate2Session:
         data: bytes,
         carrier: Carrier,
     ) -> TxState:
+        if self.state != "ACTIVE":
+            raise StreamStateError("new DATA requires an ACTIVE Session")
+        if self.streams.get(stream.stream_id) is not stream or not stream.accepted or stream.lifecycle != "OPEN":
+            raise StreamStateError("new DATA requires an accepted active Stream")
+        if stream.send_terminal_mode != "ACTIVE" or stream.send_final is not None:
+            raise StreamStateError("new DATA forbidden after local terminal state")
+        self.require_current_carrier(carrier)
         if stream.send_offset + len(data) > stream.peer_maximum:
             raise FlowControlError("local sender lacks Stream credit")
         if self.session_send_committed + len(data) > self.session_peer_maximum:
@@ -1882,6 +2034,7 @@ class Gate2Session:
         for item in carriers:
             await self._close_writer(item)
         self.carriers.clear()
+        self.active_logical_ids.clear()
         self.set_state("CLOSED")
         self.done_event.set()
 
@@ -1919,6 +2072,7 @@ class Gate2Session:
                 task.cancel()
         carriers = list(self.carriers.values())
         self.carriers.clear()
+        self.active_logical_ids.clear()
         for carrier in carriers:
             await self._close_writer(carrier)
 
@@ -2064,8 +2218,16 @@ async def client_handshake(
             raise ProtocolError("HANDSHAKE_REJECT trailing bytes")
         writer.close()
         await writer.wait_closed()
-        session.trace.emit("handshake_reject_received", error_code=error_code, state_mutated=False)
-        raise HandshakeRejected(error_code)
+        session.ambiguous_attempts.append((carrier_id, generation))
+        session.trace.emit(
+            "handshake_ambiguous",
+            session_id=session.session_id.hex(),
+            carrier_id=carrier_id,
+            generation=generation,
+            point="unauthenticated_HANDSHAKE_REJECT_after_CLIENT_FINISHED",
+            advisory_error_code=error_code,
+        )
+        raise AmbiguousHandshake(carrier_id, generation)
     if message_type == MSG_VERSION_NEGOTIATION:
         writer.close()
         await writer.wait_closed()
@@ -2131,21 +2293,27 @@ async def server_handshake(
     writer: asyncio.StreamWriter,
     key: bytes,
 ):
-    magic = await reader.readexactly(4)
+    deadline = asyncio.get_running_loop().time() + CANDIDATE_HANDSHAKE_TIMEOUT
+
+    async def handshake_wait(awaitable):
+        remaining = deadline - asyncio.get_running_loop().time()
+        return await asyncio.wait_for(awaitable, timeout=max(0.001, remaining))
+
+    magic = await handshake_wait(reader.readexactly(4))
     if magic != MAGIC:
         raise ProtocolError("invalid MPX magic")
-    version, version_raw = await read_varint(reader)
+    version, version_raw = await handshake_wait(read_varint(reader))
     if version not in session.supported_versions:
         offered = sorted(session.supported_versions, reverse=True)
         body = vi_enc(len(offered)) + b"".join(vi_enc(v) for v in offered)
-        await write_raw(writer, encode_message(MSG_VERSION_NEGOTIATION, body), session.write_chunk)
+        await handshake_wait(write_raw(writer, encode_message(MSG_VERSION_NEGOTIATION, body), session.write_chunk))
         session.trace.emit("version_negotiation_sent", requested_version=version, supported_versions=offered)
         writer.close()
         await writer.wait_closed()
         return None
     preface = magic + version_raw
 
-    message_type, _, client_init = await read_message(reader)
+    message_type, _, client_init = await handshake_wait(read_message(reader))
     if message_type != MSG_CLIENT_INIT:
         raise ProtocolError("expected CLIENT_INIT")
     init = parse_client_init(client_init)
@@ -2193,7 +2361,7 @@ async def server_handshake(
     try:
         server_nonce = secrets.token_bytes(32)
         server_init = encode_server_init(server_nonce, session.local_limits)
-        await write_raw(writer, server_init, session.write_chunk)
+        await handshake_wait(write_raw(writer, server_init, session.write_chunk))
 
         expected_client_finished, server_finished_template, h0, prelim = derive_traffic(
             key,
@@ -2201,7 +2369,7 @@ async def server_handshake(
             client_init,
             server_init,
         )
-        message_type, _, client_finished = await read_message(reader)
+        message_type, _, client_finished = await handshake_wait(read_message(reader))
         if message_type != MSG_CLIENT_FINISHED:
             raise ProtocolError("expected CLIENT_FINISHED")
         validate_finished(
@@ -2216,20 +2384,39 @@ async def server_handshake(
         session.release_candidate(init.carrier_id, init.generation)
         raise
 
-    _, server_finished, _, traffic = derive_traffic(
-        key,
-        preface,
-        client_init,
-        server_init,
-        client_finished=client_finished,
-    )
-    if server_finished != server_finished_template:
-        raise RuntimeError("internal SERVER_FINISHED derivation mismatch")
+    try:
+        _, server_finished, _, traffic = derive_traffic(
+            key,
+            preface,
+            client_init,
+            server_init,
+            client_finished=client_finished,
+        )
+        if server_finished != server_finished_template:
+            raise RuntimeError("internal SERVER_FINISHED derivation mismatch")
 
-    # Server commits the candidate when it reaches its ESTABLISHED transition.
-    # The ambiguity fault is injected after this commit but before the Client can
-    # authenticate SERVER_FINISHED.
-    session.commit_server_candidate(init, protocol_version=version)
+        # Authentication has completed, but INIT-time admission was only
+        # provisional. Commit revalidates Session identity/state, Generation
+        # and active logical Carrier capacity against current state.
+        session.commit_server_candidate(init, protocol_version=version)
+    except CandidateReject as exc:
+        session.release_candidate(init.carrier_id, init.generation)
+        await write_raw(
+            writer,
+            encode_message(MSG_HANDSHAKE_REJECT, vi_enc(exc.error_code)),
+            session.write_chunk,
+        )
+        session.trace.emit(
+            "handshake_reject_sent",
+            error_code=exc.error_code,
+            carrier_id=init.carrier_id,
+            generation=init.generation,
+            authenticated_candidate=True,
+        )
+        raise
+    except Exception:
+        session.release_candidate(init.carrier_id, init.generation)
+        raise
     session.release_candidate(init.carrier_id, init.generation)
     if session.should_drop_server_finished(init.carrier_id, init.generation):
         session.trace.emit(
@@ -2241,12 +2428,26 @@ async def server_handshake(
         )
         writer.close()
         await writer.wait_closed()
-        session.lost_incarnations.append((init.carrier_id, init.generation))
-        if not session.carriers:
-            session.set_state("DORMANT", reason="ambiguous-candidate-transport-loss")
+        session.committed_candidate_lost(
+            init.carrier_id,
+            init.generation,
+            "ambiguous-candidate-transport-loss",
+        )
         return None
 
-    await write_raw(writer, server_finished, session.write_chunk)
+    try:
+        await write_raw(writer, server_finished, session.write_chunk)
+    except BaseException:
+        session.committed_candidate_lost(
+            init.carrier_id,
+            init.generation,
+            "server-finished-output-failure",
+        )
+        try:
+            writer.close()
+        except Exception:
+            pass
+        raise
     carrier = Carrier(
         role="server",
         reader=reader,
@@ -2286,7 +2487,7 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
             )
             writer.close()
             await writer.wait_closed()
-        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError) as exc:
+        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError, asyncio.TimeoutError) as exc:
             session.trace.emit(
                 "candidate_handshake_failed",
                 error_type=type(exc).__name__,

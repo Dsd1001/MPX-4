@@ -638,6 +638,7 @@ class Carrier:
         self.write_chunk = write_chunk
         self.send_seq = 0
         self.recv_seq = 0
+        self.output_usable = True
         self._lock = asyncio.Lock()
         self._epoch = time.monotonic_ns()
 
@@ -672,13 +673,33 @@ class Carrier:
         if len(plaintext) < 1 or len(plaintext) > self.peer_limits.max_record_size:
             raise ProtocolError("record plaintext size")
         async with self._lock:
+            if not self.output_usable:
+                raise ConnectionError("ordered Carrier output unavailable")
             if self.send_seq >= MAX_KEY_RECORDS:
                 raise ProtocolError("record key limit")
             seq = self.send_seq
             header = b"\x00" + vi_enc(len(plaintext))
             ciphertext = AESGCM(self.send_key).encrypt(xor_nonce(self.send_iv, seq), plaintext, header)
-            await self._write(header + ciphertext)
-            self.send_seq += 1
+            wire = header + ciphertext
+            wrote = False
+            try:
+                if self.write_chunk > 0:
+                    for pos in range(0, len(wire), self.write_chunk):
+                        self.writer.write(wire[pos:pos+self.write_chunk])
+                        wrote = True
+                else:
+                    self.writer.write(wire)
+                    wrote = True
+                self.send_seq = seq + 1
+                await self.writer.drain()
+            except BaseException:
+                if wrote:
+                    self.output_usable = False
+                    try:
+                        self.writer.close()
+                    except Exception:
+                        pass
+                raise
         info = self.base_trace()
         info.update({"record_seq": seq, "plaintext_length": len(plaintext), "frame_type": FRAME_NAMES.get(frame_type, frame_type)})
         if fields:

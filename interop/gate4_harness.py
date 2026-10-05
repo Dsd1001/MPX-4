@@ -245,6 +245,7 @@ def execute(out_dir: Path) -> dict:
     endpoint_wire_dir = out_dir / "endpoint-wire-both"
     endpoint_mandatory_dir = out_dir / "endpoint-mandatory-both"
     sensitivity_dir = out_dir / "endpoint-sensitivity"
+    review_v2_dir = out_dir / "review-v2"
     run([
         sys.executable,
         "-m",
@@ -280,6 +281,18 @@ def execute(out_dir: Path) -> dict:
     check(sensitivity.get("negative_control_status") == "PASS", "endpoint sensitivity oracle negative controls failed")
     check(sensitivity.get("negative_control_count") == 2, "expected two sensitivity oracle negative controls")
     check(sensitivity.get("control_count") == 36, "expected thirty-six deliberate-defect sensitivity controls")
+
+    run([
+        sys.executable,
+        "-m",
+        "interop.review_v2",
+        "--out-dir",
+        str(review_v2_dir),
+    ])
+    review_v2 = read(review_v2_dir / "review-v2-report.json")
+    check(review_v2.get("status") == "PASS", "review-v2 counterexample regression failed")
+    check(review_v2.get("case_count") == 10, "expected ten review-v2 case classes")
+    check(review_v2.get("execution_count") == 20, "expected twenty A/B review-v2 executions")
 
     basic = []
     faults = []
@@ -323,6 +336,11 @@ def execute(out_dir: Path) -> dict:
             "negative_control_status": sensitivity["negative_control_status"],
             "negative_control_count": sensitivity["negative_control_count"],
         },
+        "review_v2_regression": {
+            "status": review_v2["status"],
+            "case_count": review_v2["case_count"],
+            "execution_count": review_v2["execution_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
@@ -340,9 +358,10 @@ def execute(out_dir: Path) -> dict:
         },
         "claim": (
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
-            "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, and thirty-six target-witnessed "
-            "sensitivity mutations pass after 52 unmutated baselines and two oracle negative controls; A/B real-TCP role reversal passes the "
-            "basic and five fault profiles in direct and fragmented modes."
+            "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, thirty-six target-witnessed "
+            "sensitivity mutations after 52 unmutated baselines and two oracle negative controls, and twenty A/B executions covering ten "
+            "review-v2 concurrency/output/progress regressions all pass; A/B real-TCP role reversal passes the basic and five fault profiles "
+            "in direct and fragmented modes."
         ),
         "claim_boundary": (
             "No Mandatory case is model-only, but not every Mandatory case is classified endpoint-wire: codec and cross-wire evidence remain "
@@ -370,6 +389,7 @@ def main() -> int:
             "(A profile=121/121, B profile=121/121, "
             f"endpoint-wire={report['authenticated_endpoint_wire']['total_execution_count']}, "
             f"sensitivity={report['endpoint_coverage_sensitivity']['control_count']}, "
+            f"review-v2={report['review_v2_regression']['execution_count']}, "
             f"{report['cross_basic_run_count']} cross-basic, "
             f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
         )

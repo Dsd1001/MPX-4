@@ -291,6 +291,8 @@ SESSION_ACTION is a VarInt:
 
 CREATE establishes a new Session. JOIN attaches a new authenticated Carrier to an existing Session.
 
+A Session ID is an identifier, not an authorization credential. The authentication context under which CREATE is accepted becomes part of retained Session security state. A JOIN or replacement Carrier MUST authenticate under the same retained security binding, or under an explicitly authorized deployment key-rotation mapping, before it can attach to that Session. A candidate authenticated under an unrelated trust context is SESSION_CONFLICT even when SESSION_ID and the other immutable Core Parameters match. Draft 11 does not require an on-wire PSK selector; deployment context supplies this binding as specified in SECURITY.md.
+
 ### 8.3. CARRIER_ID and CARRIER_GENERATION
 
 CARRIER_ID is a non-zero MPX VarInt in the range 1 through 2^62 - 1.
@@ -845,6 +847,10 @@ Stream byte identity is defined by Stream ID and byte Offset, not by Transmissio
 
 If newly received data overlaps byte positions already accepted for the same Stream, every overlapping octet MUST be identical. Conflicting octets are a PROTOCOL_VIOLATION.
 
+Advancing a Stream's Consumed Offset releases receive-side flow-control accounting; by itself it does **not** release this byte-identity obligation. While later STREAM_DATA for an already accepted range remains eligible for Section 15.1 overlap processing, the receiver MUST retain the exact bytes or equivalent comparison evidence sufficient to detect conflicting octets. Equivalent evidence MAY be stored in a compact or external representation and need not keep application buffers resident.
+
+An implementation that can no longer retain sufficient comparison evidence MUST NOT silently treat arbitrary low-offset STREAM_DATA as valid merely because the bytes are below Consumed Offset. It MUST either retain enough evidence until a protocol state makes such traffic unambiguously stale/without semantic effect under the terminal/retired Stream rules, or apply a local resource policy that safely terminates the affected scope before the evidence is discarded. This is a receive-state/resource requirement and does not change flow-control credit accounting.
+
 Duplicate data MUST NOT be delivered to the application more than once.
 
 A receiver MUST buffer or otherwise account for out-of-order Stream data until lower offsets are available or the Stream is reset.
@@ -915,7 +921,7 @@ Body:
 
 Consumed Offset is the exclusive next byte position after the highest contiguous prefix released from receive-side accounting.
 
-If bytes [0, N) have been consumed or otherwise validly released, Consumed Offset is N.
+If bytes [0, N) have been consumed or otherwise validly released, Consumed Offset is N. Releasing those bytes from flow-control accounting does not by itself permit the receiver to forget byte-identity evidence required by Section 15.1 for later overlapping STREAM_DATA.
 
 Maximum Offset is an exclusive upper bound. A sender may commit bytes only when End Offset <= Maximum Offset.
 

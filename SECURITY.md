@@ -41,6 +41,10 @@ Different administrative trust domains SHOULD use independent transport keys.
 
 Draft 11 defines no on-wire PSK identity or key selector. The deployment/service context MUST select the one transport key used to verify a candidate before Finished authentication is evaluated. A shared listener serving multiple transport keys therefore needs an external trusted demultiplexing context or a separately negotiated extension; Core does not standardize trial-decryption/verification across a key set. PSK selection is not itself peer authentication.
 
+When CREATE is authenticated and accepted, the retained Session MUST be bound to the authentication principal or administrative trust domain represented by that deployment/service key context. Every later JOIN or replacement Carrier MUST authenticate under the same Session binding, or under a deployment-authorized key-rotation mapping that explicitly preserves that binding, before it can attach to the Session. Possession of a Session ID alone MUST NOT authorize JOIN. A listener that serves multiple trust domains MUST therefore preserve the CREATE-time binding across all endpoints that can accept JOIN for that Session; a candidate authenticated under a different unrelated key context is SESSION_CONFLICT even if its Session ID and other Core Parameters match.
+
+This requirement does not add a mandatory on-wire key selector. Deployments can satisfy it with listener partitioning, trusted external demultiplexing, shared authenticated Session metadata, or an extension that defines authorized key rotation.
+
 A transport key SHOULD be replaced after suspected disclosure.
 
 ## Forward secrecy

@@ -592,9 +592,10 @@ A tombstone SHOULD retain, when applicable:
 - peer Final Offset;
 - peer terminal Stream Error Code for RESET_STREAM;
 - last receive-side Consumed Offset;
-- last receive-side Maximum Offset.
+- last receive-side Maximum Offset;
+- exact accepted Stream bytes or equivalent overlap-comparison evidence for any range that still remains subject to the Section 15.1 byte-identity rule.
 
-An implementation MAY retain additional state.
+An implementation MAY retain additional state. Flow-control release and application-buffer release do not by themselves release overlap-comparison evidence.
 
 ## 16. Tombstone entry conditions
 
@@ -617,7 +618,7 @@ While a tombstone is retained:
 
 - duplicate STREAM_OPEN with the original open Transmission ID SHOULD receive the original OPEN_OK or OPEN_REJECT decision;
 - duplicate STREAM_FIN or RESET_STREAM matching the recorded terminal state is acknowledged again;
-- STREAM_DATA wholly within the recorded peer Final Offset has no application effect and MAY be acknowledged as stale traffic;
+- STREAM_DATA wholly within the recorded peer Final Offset has no application effect and MAY be acknowledged as stale traffic; if that traffic still falls under the Core overlap-comparison obligation, retained exact bytes or equivalent evidence MUST reject conflicting octets rather than silently accepting them;
 - STREAM_DATA extending beyond the recorded peer Final Offset is FINAL_SIZE_ERROR;
 - STREAM_CREDIT is validated against the recorded local Final Offset and otherwise ignored;
 - duplicate STREAM_CONSUMED matching the recorded local Final Offset is acknowledged again;

@@ -1061,34 +1061,46 @@ async def case_simultaneous_candidates(implementation: str) -> dict:
         await f.establish(1, 0, 0)
         core = f.core
         assert f.port is not None
-        # Candidate A reaches SERVER_INIT and remains pending before CLIENT_FINISHED.
-        r1, w1 = await asyncio.open_connection("127.0.0.1", f.port)
         preface = core.MAGIC + core.vi_enc(core.VERSION)
-        ci1 = core.encode_client_init(
-            f.session_id, 96, 0, secrets.token_bytes(32), f.limits, 1
-        )
-        w1.write(preface + ci1)
-        await w1.drain()
-        m1, _, si1 = await core.read_message(r1)
-        check(m1 == core.MSG_SERVER_INIT, m1)
-        await wait_until(lambda: f.session.pending_candidates, label="pending candidate reservation")
 
-        # Candidate B with the same logical identity must lose without mutation.
-        rejected = await f.expect_rejected_candidate(
-            action=1,
-            carrier_id=96,
-            generation=0,
-            expected_error_code=ERROR_CARRIER_CONFLICT,
+        async def start_same_generation_candidate():
+            reader, writer = await asyncio.open_connection("127.0.0.1", f.port)
+            client_init = core.encode_client_init(
+                f.session_id, 96, 0, secrets.token_bytes(32), f.limits, 1
+            )
+            writer.write(preface + client_init)
+            await writer.drain()
+            msg, _, server_init = await core.read_message(reader)
+            check(msg == core.MSG_SERVER_INIT, msg)
+            client_finished, expected_sf, _, prelim = core.derive_traffic(
+                f.key, preface, client_init, server_init
+            )
+            return reader, writer, client_init, server_init, client_finished, expected_sf, prelim
+
+        # Unauthenticated arrival order does not reserve Generation. Both
+        # candidates are allowed to reach SERVER_INIT and remain HANDSHAKING.
+        a = await start_same_generation_candidate()
+        b = await start_same_generation_candidate()
+
+        def pending_count() -> int:
+            pending = f.session.pending_candidates
+            if isinstance(pending, dict):
+                return sum(int(x) for x in pending.values())
+            return len(pending)
+
+        await wait_until(
+            lambda: pending_count() >= 2,
+            label="two simultaneous handshaking candidates",
         )
 
-        cf, expected_sf, h0, prelim = core.derive_traffic(f.key, preface, ci1, si1)
-        w1.write(cf)
+        r1, w1, ci1, si1, cf1, expected_sf1, _ = a
+        w1.write(cf1)
         await w1.drain()
-        m2, _, sf = await core.read_message(r1)
-        check(m2 == core.MSG_SERVER_FINISHED and sf == expected_sf, (m2, sf.hex()))
+        m1, _, sf1 = await core.read_message(r1)
+        check(m1 == core.MSG_SERVER_FINISHED and sf1 == expected_sf1, (m1, sf1.hex()))
         _, server_limits = core.parse_server_init(si1)
         _, _, _, traffic = core.derive_traffic(
-            f.key, preface, ci1, si1, client_finished=cf, server_finished=sf
+            f.key, preface, ci1, si1, client_finished=cf1, server_finished=sf1
         )
         p96 = Peer(
             core,
@@ -1101,13 +1113,31 @@ async def case_simultaneous_candidates(implementation: str) -> dict:
             [],
         )
         f.peers[96] = p96
-        await wait_until(lambda: 96 in f.session.carriers, label="winner candidate commit")
+        await wait_until(lambda: 96 in f.session.carriers, label="first authenticated candidate commit")
         await p96.recv_until(core.FRAME_SESSION_CREDIT)
         check(f.session.highest_accepted[96] == 0, f.session.highest_accepted)
-        # A fresh higher Generation remains recoverable.
+
+        # The second equal-Generation candidate loses only when it reaches its
+        # own authenticated commit point and observes H=0 already committed.
+        r2, w2, _, _, cf2, _, _ = b
+        w2.write(cf2)
+        await w2.drain()
+        m2, body2, _ = await core.read_message(r2)
+        check(m2 == core.MSG_HANDSHAKE_REJECT, m2)
+        code, pos = core.vi_dec(body2)
+        check(pos == len(body2) and code == ERROR_CARRIER_CONFLICT, (code, pos, len(body2)))
+        w2.close()
+
+        check(f.session.highest_accepted[96] == 0, f.session.highest_accepted)
+        check(f.session.carriers[96].generation == 0, f.session.carriers[96].generation)
         p96g1 = await complete_candidate(f, carrier_id=96, generation=1)
         await f.ping(p96g1, 0xB11)
-        return {"loser_reject": rejected["error_code"], "winner_generation": 0, "next_generation": 1}
+        return {
+            "loser_reject": code,
+            "winner_generation": 0,
+            "next_generation": 1,
+            "both_reached_server_init": True,
+        }
 
 
 async def case_dormant_retirement(implementation: str) -> dict:
