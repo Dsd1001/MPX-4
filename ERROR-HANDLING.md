@@ -3,7 +3,7 @@
 **Document:** MPX/4 Error Handling Supplement  
 **Revision:** Draft 11
 **Protocol Version:** 4  
-**Status:** Normative Working Draft
+**Status:** Normative Stable
 
 This document is a normative companion to [SPECIFICATION.md](SPECIFICATION.md). It defines the scope of Core errors and the required protocol action after those errors are detected.
 

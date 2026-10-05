@@ -3,7 +3,7 @@
 **Document:** MPX/4 Core Protocol  
 **Revision:** Draft 11
 **Protocol Version:** 4  
-**Status:** Working Draft
+**Status:** Stable Core Specification
 
 ---
 

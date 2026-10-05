@@ -3,7 +3,7 @@
 **Document:** MPX/4 TCP Transport Binding  
 **Revision:** Draft 11
 **Protocol Version:** 4  
-**Status:** Normative Working Draft
+**Status:** Normative Stable
 
 This document defines the normative mapping of MPX/4 onto TCP.
 

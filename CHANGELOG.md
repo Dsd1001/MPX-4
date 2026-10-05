@@ -2,7 +2,30 @@
 
 All notable MPX/4 specification changes are recorded here.
 
-MPX/4 remains in draft status. Draft revisions may make explicitly documented incompatible changes until a Protocol Version is declared stable.
+Protocol Version 4 is stable as of the `protocol-v4.0.0` release. Draft 11 is the frozen specification revision for that stable protocol version; incompatible Core evolution now requires a new Protocol Version.
+
+## Protocol Version 4 Stable — 2026-10-06
+
+The `protocol-v4.0.0` release formally freezes MPX/4 Protocol Version 4 on the reviewed Draft 11 Core. This stability release changes no wire encoding, successful-handshake transcript, key schedule, Secure Record format, registry assignment, or mandatory Core semantic relative to the immediately preceding reviewed Draft 11 tree.
+
+### Declared
+
+- Added [STABILITY.md](STABILITY.md) as the Protocol Version 4 Stability Declaration.
+- Fixed the exact normative document set, stable registry snapshot, Mandatory interoperability profile, and mandatory machine-readable vector set.
+- Declared Draft 11 the frozen specification revision for Protocol Version 4.
+- Declared `protocol-v4.0.0` the stable release boundary.
+
+### Compatibility
+
+- Existing Protocol Version 4 mandatory Core wire syntax and semantics are frozen.
+- Any incompatible change to mandatory Core encoding, semantics, transcript construction, key derivation, Secure Record behavior, state transitions, or failure scope requires a new Protocol Version.
+- New optional extensions remain possible only under the explicit negotiation/safe-ignore rules in COMPATIBILITY.md.
+- Registry assignments frozen by the stable snapshot MUST NOT be reassigned incompatibly within Protocol Version 4.
+
+### Evidence boundary
+
+- The stability declaration incorporates the repository's 121-case Mandatory profile, source-isolated A/B Gate 4 evidence, authenticated endpoint execution, sensitivity controls, review regressions, and freeze-followup controls.
+- Stable protocol status is a compatibility commitment. It does not by itself claim production-scale capacity, long-lived Internet deployment validation, organizationally independent third-party implementation, or a formal cryptographic audit.
 
 ## Draft 11 — 2026-10-04
 
@@ -81,7 +104,7 @@ Draft 11 is a freeze-preparation revision driven by the consolidated Draft 10 cr
 - b66 independent replay follow-up closes four P2 progress/boundary gaps without changing the Draft 11 wire format: CREDIT_PROBE response obligations are persisted/coalesced at Session scope and fail over across writable Carriers; confirmation output uses bounded actor failover and retained RESET response work is Session-owned across repeated failures/DORMANT recovery; DATA allocation preflight checks Transmission-ID namespace eligibility before VarInt preview so exhaustion still drives RESOURCE_LIMIT closure; and zero-length DATA is rejected before any Transmission ID, offset, Session commitment, or Record sequence change. `interop/review_b66.py` adds 10 classes / 20 A/B executions and is required by Gate 4 and CI.
 - Stable-audit closure fixes the remaining pre-freeze findings without changing the Draft 11 wire format: unauthenticated candidate TCP transport/reset failures stay candidate-local even during writer cleanup; unknown non-critical CLIENT_INIT/SERVER_INIT Parameters are accepted while unknown critical Parameters remain rejected and raw transcript bytes remain authenticated; committed reliable DATA is handed to Session-owned pending work before the first output await so caller cancellation cannot orphan it; retired/tombstone text now separates byte-overlap evidence lifetime from confirmation replay and makes valid TOMBSTONE entry the stale-DATA boundary; Generation vectors are input-driven for the reviewed cases; Gate 4 binds exact Mandatory IDs and recomputes evidence; sensitivity rejects post-target infrastructure failures; and B15 checks actual canonical transcript message types. `interop/review_stable.py` now adds 10 classes / 18 executions (16 A/B runtime + 2 validator controls) covering concurrent flush coalescing, retirement-task cleanup, the higher-generation reject after-state, and endpoint-source report binding in addition to the previous stable-audit closure. `interop/review_freeze.py` adds 10 native-CLI process executions spanning no-fault/pre-auth controls and post-auth CREATE/JOIN/replacement initial-credit output failures, proving the failed authenticated Carrier remains Carrier-scoped while the Session recovers or continues on another Carrier. Both suites are required by Gate 4 and CI.
 - 59a63ba freeze-audit follow-up closes the new P1/P2/P3 findings without wire-format or cryptographic changes: `CarrierOutputError` from an authenticated Carrier is classified by actor scope instead of becoming Session fatal; `higher-generation-commit` validates replace/reject after-state and previous-generation state; sensitivity mutation attribution is guard/type-bound and rejects injected post-target timeout/JSON failures; Session cleanup owns `retire_task`; concurrent reliable-DATA handoff uses one coalesced Session flush worker; Gate 4 cross-checks profile endpoint probe references/counts against source reports; and SECURITY.md scopes overlap-byte identity to the Core eligibility lifetime.
-- Gate 4's independence claim remains source/module isolation within the same repository/project, not external organizational independence. Model-only Mandatory coverage is now zero, but codec and cross-wire remain the appropriate executable evidence for 48 of 121 Mandatory IDs, so this is not restated as "all 121 are endpoint-wire". Gate 4 does not declare Protocol Version 4 stable.
+- Gate 4's independence claim remains source/module isolation within the same repository/project, not external organizational independence. Model-only Mandatory coverage is now zero, but codec and cross-wire remain the appropriate executable evidence for 48 of 121 Mandatory IDs, so this is not restated as "all 121 are endpoint-wire". Gate 4 supplies interoperability evidence; the separate stability declaration is now recorded in STABILITY.md.
 
 ### Compatibility
 

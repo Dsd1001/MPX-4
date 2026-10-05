@@ -8,6 +8,8 @@ Normative protocol behavior is defined in [SPECIFICATION.md](SPECIFICATION.md), 
 
 ## Draft 11 security profile
 
+Draft 11 is the frozen security baseline for stable Protocol Version 4 under [STABILITY.md](STABILITY.md). Stability freezes the mandatory cryptographic protocol behavior; it is not a substitute for deployment-specific threat analysis or an independent cryptographic audit.
+
 The mandatory-to-implement Draft 11 profile uses:
 
 - a 32-octet cryptographically random pre-shared transport key;

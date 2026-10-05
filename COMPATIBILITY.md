@@ -3,7 +3,7 @@
 **Document:** MPX/4 Versioning and Compatibility
 **Revision:** Draft 11
 **Protocol Version:** 4
-**Status:** Normative Working Draft
+**Status:** Normative Stable
 
 This document is a normative companion to [SPECIFICATION.md](SPECIFICATION.md). It defines the relationship between the on-wire Protocol Version, draft specification revisions, Core evolution, and extensions.
 
@@ -123,9 +123,9 @@ A Carrier using one Protocol Version MUST NOT inject Frames, credit, Transmissio
 
 ## 9. Stability declaration
 
-A future specification revision may declare Protocol Version 4 stable.
+Protocol Version 4 is declared stable by [STABILITY.md](STABILITY.md), with Draft 11 as the frozen specification revision and release tag `protocol-v4.0.0` as the release boundary.
 
-That declaration SHOULD identify:
+The stability declaration identifies:
 
 - the exact normative document set;
 - the registry snapshot;
@@ -133,4 +133,4 @@ That declaration SHOULD identify:
 - mandatory machine-readable vectors;
 - the extension and versioning policy that remains applicable after stability.
 
-Until such a declaration, MPX/4 Version 4 remains a development protocol version and draft revisions may still make explicitly documented incompatible changes.
+From the `protocol-v4.0.0` release boundary onward, Protocol Version 4 is no longer a development protocol version. A later editorial revision may clarify Version 4 without changing peer-visible mandatory Core behavior, but any incompatible Core wire or semantic change requires a new Protocol Version under Sections 4–7.

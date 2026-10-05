@@ -1,11 +1,13 @@
 # MPX/4 Protocol Registries
 
-**Protocol:** MPX/4  
+**Protocol:** MPX/4
+**Protocol Version:** 4
 **Registry Revision:** Draft 11
+**Status:** Stable Registry Snapshot
 
 This document records numeric assignments used by the MPX/4 Core Protocol and published extensions maintained in this repository.
 
-This file is the current registry snapshot for development Protocol Version 4. Draft revisions may still make explicitly documented incompatible changes. Once Protocol Version 4 is declared stable, assignments and incompatible semantic changes are governed by [COMPATIBILITY.md](COMPATIBILITY.md).
+This file is the registry snapshot frozen for stable Protocol Version 4 by [STABILITY.md](STABILITY.md). Assigned numeric values and incompatible Core semantics are governed by [COMPATIBILITY.md](COMPATIBILITY.md) and MUST NOT be reassigned or changed incompatibly within Protocol Version 4.
 
 ## 1. Allocation ranges
 

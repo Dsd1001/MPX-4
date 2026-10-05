@@ -13,10 +13,12 @@ It provides:
 
 ## Current specification
 
-**Protocol version:** 4  
+**Protocol version:** 4
 **Specification revision:** Draft 11
-**Status:** Working Draft
+**Stability release:** `protocol-v4.0.0`
+**Status:** Stable
 
+- [Protocol Version 4 Stability Declaration](STABILITY.md)
 - [Core Protocol Specification](SPECIFICATION.md)
 - [Normative State Machines and Frame Validity](STATE-MACHINES.md)
 - [Normative Error Handling and Failure Scope](ERROR-HANDLING.md)
@@ -52,7 +54,7 @@ The core protocol separates Stream semantics from Carrier transport semantics. A
 
 Draft 11 keeps the ACTIVE / DORMANT Session model and immutable Session Protocol Version, while removing scheduler-mode negotiation from Core. Each endpoint selects Carriers for its own outbound Attempts using local policy subject to Core reliability, flow-control, identity, and Carrier-eligibility invariants.
 
-Draft 11 is a freeze-preparation revision: it adds no scheduler or Relay topology to Core and no new successful-handshake wire element. It closes ambiguous-establishment recovery and reliable-state progress contracts and strengthens executable validation coverage.
+Draft 11 is the frozen specification revision for stable Protocol Version 4. It adds no scheduler or Relay topology to Core and no new successful-handshake wire element. The `protocol-v4.0.0` release freezes the reviewed Core wire syntax and mandatory semantics; incompatible Core evolution now requires a new Protocol Version.
 
 ## Interoperability material
 
@@ -100,7 +102,7 @@ Gate 3 retains the 121 A–L case IDs and records the executable evidence class 
 
 Gate 4 adds `independent/`, a source-isolated second implementation with its own wire/crypto/endpoint runtime, plus neutral `interop/` harnesses. The aggregate requires both 121/121 executable-evidence profiles with `model=0`, **286 authenticated endpoint executions** (200 baseline receiver/error/scheduling probes plus 86 A/B executions for formerly model-only requirements), **36 target-witnessed deliberate-defect controls**, **52 unmutated sensitivity baselines**, **8 oracle negative controls**, the **20-execution review-v2 suite**, a separate **18-execution update-review suite** covering 5 remaining counterexamples plus 4 paired normal controls, a **22-execution independent follow-up suite** covering 6 newly reproduced lifecycle/output/API counterexamples plus 5 normal controls, a **20-execution b66 follow-up suite** covering CREDIT_PROBE response recovery, multi-Carrier ACK/RESET progress, Transmission-ID exhaustion lifecycle, and DATA lower-bound controls, an **18-execution stable-audit closure suite** covering legal unknown non-critical handshake Parameters, Session-owned DATA cancellation/coalescing, retirement-task cleanup, Generation-oracle state, and Gate 4 profile/source binding, plus a **22-execution freeze-followup suite** (18 native-CLI process cases plus four A/B Client/Server encrypted-Record ownership cases) covering no-fault/pre-auth controls, authenticated post-commit CREATE/JOIN/replacement output failures, pre-write initial-credit failure with autonomous SESSION_CREDIT, all-path-loss/rejoin debt, cancellation/coalescing, newer snapshots, separate retirement refresh, and terminal cleanup while keeping failed Carriers Carrier-scoped, plus A→B/B→A basic full-duplex runs and all five cross-runtime fault scenarios in direct and fragmented modes. Update-review coverage closes post-Finished stale object installation, STOP default-RESET persistence across ACK output failure, exact TRANSMISSION_RETIRE watermark accounting during interleaving, and failover away from a key-exhausted Carrier. The independent follow-up suite additionally enforces terminal Client installation guards, pre-open STOP response persistence, cross-Carrier output-failure actor isolation/recovery, immutable DATA payload ownership, and fail-atomic local DATA size validation. The b66 follow-up makes response work Session-owned: CREDIT_PROBE advertisements are coalesced and fail over across writable Carriers, retained ACK/RESET work survives repeated output-actor loss, DATA namespace exhaustion preserves RESOURCE_LIMIT closure, and empty DATA is rejected before Transmission/accounting commit. Sensitivity binds mutation detection to the intended guard identity and expected failure class, and rejects unrelated infrastructure failures as ERROR/INCONCLUSIVE both before and after target witness. J5 verifies failed candidate authentication and unauthenticated candidate-RST isolation against the actual CLI Server process. Gate 4 binds the exact 121 Mandatory IDs, recomputes per-case evidence summaries, and cross-checks endpoint probe names plus execution counts against the actual endpoint reports rather than trusting profile aggregate fields. The B runtime is audited to import no `reference/`, `tools/`, or validator code and the critical A/B receive handlers are structurally compared.
 
-This is a source/module-independence claim, not a claim that the two implementations were developed by separate organizations: both live in this repository and share public fixtures and test-scenario design. No Mandatory case is model-only, but this still does **not** mean all 121 cases are endpoint-wire tests: 18 are codec evidence and 30 are cross-wire evidence by design. Draft 11 still does **not** declare Protocol Version 4 stable.
+This is a source/module-independence claim, not a claim that the two implementations were developed by separate organizations: both live in this repository and share public fixtures and test-scenario design. No Mandatory case is model-only, but this still does **not** mean all 121 cases are endpoint-wire tests: 18 are codec evidence and 30 are cross-wire evidence by design. Protocol Version 4 is declared stable by [STABILITY.md](STABILITY.md) at the `protocol-v4.0.0` release boundary.
 
 ## Extension points
 

@@ -4,6 +4,8 @@ This directory contains machine-readable interoperability vectors for MPX/4.
 
 The vectors allow independent implementations to verify that they produce identical canonical encodings and cryptographic derivations.
 
+For stable Protocol Version 4 (`protocol-v4.0.0`), the Core JSON files listed below form the mandatory machine-readable vector set identified by [STABILITY.md](../STABILITY.md). Extension-specific vectors remain outside mandatory Core conformance unless their extension is negotiated.
+
 Current sets:
 
 - [varint.json](varint.json) — canonical MPX variable-length integer encodings and invalid inputs.

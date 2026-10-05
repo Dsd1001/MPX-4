@@ -3,7 +3,7 @@
 **Document:** MPX/4 Interoperability Profile  
 **Revision:** Draft 11
 **Protocol Version:** 4  
-**Status:** Working Interoperability Profile
+**Status:** Stable Interoperability Profile
 
 This document defines a common interoperability test profile for independent MPX/4 implementations.
 
@@ -626,7 +626,7 @@ Gate 4 adds a second source-isolated implementation and a neutral process harnes
 
 The repository's second implementation is source/module isolated from the reference implementation and validator at runtime, but both implementations are maintained in the same repository and test project. This evidence supports an executable Mandatory-profile claim without asserting separate organizational or third-party development. The fact that model-only coverage is zero MUST NOT be restated as "all 121 cases are endpoint-wire" because codec and cross-wire evidence remain the appropriate executable surface for 48 case IDs.
 
-These executable gates are evidence for Draft 11 interoperability only. They do not replace the separate requirements for a Protocol Version Stability Declaration.
+These executable gates are the repository evidence required by the Protocol Version 4 [Stability Declaration](STABILITY.md). They demonstrate conformance to the Mandatory profile, but do not by themselves establish production capacity, deployment security, third-party organizational independence, or a formal cryptographic audit.
 
 ## 19. Compatibility
 
@@ -636,4 +636,4 @@ Draft 11 tightens recovery and progress semantics without adding a new Core nume
 
 Draft 10 and Draft 11 are wire-compatible but are not guaranteed to make identical liveness/resource decisions in these edge cases. A Draft 10 implementation can still be interoperable on ordinary successful paths while lacking Draft 11 recovery/progress guarantees.
 
-The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 11 remains a development revision of Protocol Version 4 and does not yet declare Version 4 stable.
+The normative long-term compatibility rules are defined in COMPATIBILITY.md. Draft 11 is the frozen specification revision for stable Protocol Version 4 under [STABILITY.md](STABILITY.md); any incompatible Core change after `protocol-v4.0.0` requires a new Protocol Version.
