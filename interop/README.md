@@ -12,6 +12,7 @@ This directory orchestrates tests between the two executable implementations wit
 - review_v2.py — preserves the earlier 10-class / 20-execution review-v2 concurrency/output/progress evidence.
 - review_update.py — adds 9 case classes / 18 A/B executions for the update review: post-Finished stale installation, STOP default-RESET persistence across ACK output failure, exact retirement-prefix accounting, key-exhaustion failover, and paired normal controls.
 - review_followup.py — adds 11 case classes / 22 A/B executions from the independent replay: terminal Client late-JOIN installation, pre-open STOP response persistence, cross-Carrier output actor isolation/recovery, immutable DATA payload ownership, fail-atomic oversized DATA rejection, and paired normal controls.
+- review_b66.py — adds 10 case classes / 20 A/B executions for the b66 follow-up: Client/Server CREDIT_PROBE response recovery, repeated ACK-output failover with retained RESET progress, Transmission-ID exhaustion closure, and empty/one-byte DATA boundaries.
 - gate4_harness.py — aggregate Gate 4 runner.
 
 ## Gate 4 requirements enforced by the aggregate runner
@@ -30,7 +31,7 @@ Gate 4 aggregate is PASS only when:
 10. Both role directions pass all five fault/recovery scenarios.
 11. The cross-basic and cross-fault runs are repeated with endpoint writes fragmented to 257 bytes.
 
-The aggregate therefore contains **286 authenticated endpoint executions**, thirty-six target-witnessed sensitivity controls after 52 unmutated baselines and two oracle negative controls, **20 review-v2 executions**, **18 update-review executions**, **22 independent follow-up executions**, four cross-basic executions, and twenty cross-fault scenario executions. No Mandatory case is model-only; codec and cross-wire remain the appropriate executable evidence for 48 of the 121 IDs.
+The aggregate therefore contains **286 authenticated endpoint executions**, thirty-six target-witnessed sensitivity controls after 52 unmutated baselines and two oracle negative controls, **20 review-v2 executions**, **18 update-review executions**, **22 independent follow-up executions**, **20 b66 follow-up executions**, four cross-basic executions, and twenty cross-fault scenario executions. No Mandatory case is model-only; codec and cross-wire remain the appropriate executable evidence for 48 of the 121 IDs.
 
 ## Independence boundary
 

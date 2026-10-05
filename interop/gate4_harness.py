@@ -248,6 +248,7 @@ def execute(out_dir: Path) -> dict:
     review_v2_dir = out_dir / "review-v2"
     review_update_dir = out_dir / "review-update"
     review_followup_dir = out_dir / "review-followup"
+    review_b66_dir = out_dir / "review-b66"
     run([
         sys.executable,
         "-m",
@@ -320,6 +321,18 @@ def execute(out_dir: Path) -> dict:
     check(review_followup.get("case_count") == 11, "expected eleven follow-up review case classes")
     check(review_followup.get("execution_count") == 22, "expected twenty-two A/B follow-up review executions")
 
+    run([
+        sys.executable,
+        "-m",
+        "interop.review_b66",
+        "--out-dir",
+        str(review_b66_dir),
+    ])
+    review_b66 = read(review_b66_dir / "review-b66-report.json")
+    check(review_b66.get("status") == "PASS", "b66 independent-review regression failed")
+    check(review_b66.get("case_count") == 10, "expected ten b66 review case classes")
+    check(review_b66.get("execution_count") == 20, "expected twenty b66 A/B executions")
+
     basic = []
     faults = []
     for chunk in (0, 257):
@@ -377,6 +390,11 @@ def execute(out_dir: Path) -> dict:
             "case_count": review_followup["case_count"],
             "execution_count": review_followup["execution_count"],
         },
+        "review_b66_regression": {
+            "status": review_b66["status"],
+            "case_count": review_b66["case_count"],
+            "execution_count": review_b66["execution_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
@@ -396,8 +414,9 @@ def execute(out_dir: Path) -> dict:
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
             "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, thirty-six target-witnessed "
             "sensitivity mutations after 52 unmutated baselines and two oracle negative controls, twenty A/B executions covering ten "
-            "review-v2 regressions, eighteen A/B executions covering nine update-review classes, and twenty-two A/B executions "
-            "covering the independent follow-up lifecycle/output/API counterexamples and controls all pass; "
+            "review-v2 regressions, eighteen A/B executions covering nine update-review classes, twenty-two A/B executions "
+            "covering the independent follow-up lifecycle/output/API counterexamples and controls, and twenty b66 review executions "
+            "covering pending-response progress plus DATA namespace/lower-bound controls all pass; "
             "A/B real-TCP role reversal passes the basic and five fault profiles "
             "in direct and fragmented modes."
         ),
@@ -430,6 +449,7 @@ def main() -> int:
             f"review-v2={report['review_v2_regression']['execution_count']}, "
             f"review-update={report['review_update_regression']['execution_count']}, "
             f"review-followup={report['review_followup_regression']['execution_count']}, "
+            f"review-b66={report['review_b66_regression']['execution_count']}, "
             f"{report['cross_basic_run_count']} cross-basic, "
             f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
         )

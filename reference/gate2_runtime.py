@@ -266,6 +266,9 @@ class Gate2Session:
         self.next_stream_id = 1
         self.next_txid = 1
         self.local_tx: Dict[int, TxState] = {}
+        self.pending_confirmation_txids: Set[int] = set()
+        self.pending_response_txids: Set[int] = set()
+        self.pending_credit_stream_ids: Set[int] = set()
         self.settled_through = 0
         self.last_retire_advertised = 0
         self.retire_task: Optional[asyncio.Task[None]] = None
@@ -539,6 +542,7 @@ class Gate2Session:
         self.carrier_change_event.set()
         self.carrier_change_event = asyncio.Event()
         await self.refresh_after_establish(carrier)
+        await self.flush_pending_work()
         return True
 
     async def refresh_after_establish(self, carrier: Carrier) -> None:
@@ -620,6 +624,124 @@ class Gate2Session:
     def alternate_carrier(self, incoming: Carrier) -> Carrier:
         return self.choose_carrier(exclude=incoming.carrier_id)
 
+    def require_tx_allocation_available(self) -> int:
+        txid = self.next_txid
+        if txid > MAX_VARINT:
+            self.schedule_resource_close("Transmission ID space exhausted")
+            raise RuntimeError("Transmission ID space exhausted")
+        return txid
+
+    async def flush_pending_confirmations(self, preferred: Optional[int] = None) -> None:
+        while self.pending_confirmation_txids and self.state == "ACTIVE":
+            txid = min(self.pending_confirmation_txids)
+            confirmation = self.peer_tx_confirmation.get(txid)
+            if confirmation is None:
+                self.pending_confirmation_txids.discard(txid)
+                continue
+            frame_type, saved_fields = confirmation
+            try:
+                carrier = self.choose_carrier(preferred=preferred)
+            except RuntimeError:
+                return
+            fields = dict(saved_fields)
+            if frame_type == FRAME_TRANSMISSION_ACK:
+                fields["receiver_timestamp_us"] = carrier.timestamp_us()
+            try:
+                await self.send_frame(carrier, frame_type, **fields)
+            except CarrierOutputError:
+                preferred = None
+                continue
+            self.pending_confirmation_txids.discard(txid)
+            preferred = None
+            self.trace.emit(
+                "pending_confirmation_sent",
+                **carrier.base_trace(),
+                transmission_id=txid,
+                frame_type=FRAME_NAMES.get(frame_type, frame_type),
+            )
+
+    def queue_response_tx(self, tx: TxState) -> None:
+        if not tx.settled:
+            self.pending_response_txids.add(tx.txid)
+
+    async def flush_pending_response_tx(self, preferred: Optional[int] = None) -> None:
+        while self.pending_response_txids and self.state == "ACTIVE":
+            txid = min(self.pending_response_txids)
+            tx = self.local_tx.get(txid)
+            if tx is None or tx.settled:
+                self.pending_response_txids.discard(txid)
+                continue
+            try:
+                carrier = self.choose_carrier(preferred=preferred)
+            except RuntimeError:
+                return
+            try:
+                await self.send_tx(tx, carrier, reinjection=tx.attempts > 0)
+            except CarrierOutputError:
+                preferred = None
+                continue
+            self.pending_response_txids.discard(txid)
+            preferred = None
+            stream = self.streams.get(tx.stream_id)
+            if (
+                stream is not None
+                and stream.local_terminal_txid == tx.txid
+                and tx.frame_type == FRAME_RESET_STREAM
+            ):
+                stream.reset_sent_event.set()
+            self.trace.emit(
+                "pending_response_attempted",
+                **carrier.base_trace(),
+                transmission_id=tx.txid,
+                frame_type=FRAME_NAMES.get(tx.frame_type, tx.frame_type),
+                attempt=tx.attempts,
+            )
+
+    async def flush_pending_credit_responses(self, preferred: Optional[int] = None) -> None:
+        while self.pending_credit_stream_ids and self.state == "ACTIVE":
+            stream_id = min(self.pending_credit_stream_ids)
+            try:
+                carrier = self.choose_carrier(preferred=preferred)
+            except RuntimeError:
+                return
+            try:
+                if stream_id != 0:
+                    stream = self.streams.get(stream_id)
+                    if stream is not None:
+                        await self.send_frame(
+                            carrier,
+                            FRAME_STREAM_CREDIT,
+                            stream_id=stream_id,
+                            consumed_offset=0,
+                            maximum_offset=stream.local_maximum,
+                        )
+                        self.stream_credit_refreshes += 1
+                        carrier = self.choose_carrier(preferred=carrier.carrier_id)
+                await self.send_frame(
+                    carrier,
+                    FRAME_SESSION_CREDIT,
+                    consumed_bytes=0,
+                    maximum_bytes=self.session_local_maximum,
+                )
+                self.session_credit_refreshes += 1
+            except CarrierOutputError:
+                preferred = None
+                continue
+            self.pending_credit_stream_ids.discard(stream_id)
+            preferred = None
+            self.trace.emit(
+                "pending_credit_response_sent",
+                **carrier.base_trace(),
+                stream_id=stream_id,
+            )
+
+    async def flush_pending_work(self) -> None:
+        if self.state != "ACTIVE":
+            return
+        await self.flush_pending_confirmations()
+        await self.flush_pending_response_tx()
+        await self.flush_pending_credit_responses()
+
     async def send_frame(self, carrier: Carrier, frame_type: int, **fields: object) -> None:
         self.require_current_carrier(carrier)
         try:
@@ -667,10 +789,7 @@ class Gate2Session:
         return stream_id
 
     def alloc_tx(self, frame_type: int, stream_id: int, **fields: object) -> TxState:
-        txid = self.next_txid
-        if txid > MAX_VARINT:
-            self.schedule_resource_close("Transmission ID space exhausted")
-            raise RuntimeError("Transmission ID space exhausted")
+        txid = self.require_tx_allocation_available()
         self.next_txid += 1
         wire_fields = dict(fields)
         wire_fields["stream_id"] = stream_id
@@ -911,25 +1030,8 @@ class Gate2Session:
         ):
             return
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-        try:
-            await self.send_frame(
-                reply,
-                FRAME_TRANSMISSION_ACK,
-                stream_id=stream_id,
-                transmission_id=txid,
-                receiver_timestamp_us=reply.timestamp_us(),
-            )
-        except CarrierOutputError:
-            if self.state in {"CLOSING", "CLOSED"}:
-                return
-            retry = self.choose_carrier()
-            await self.send_frame(
-                retry,
-                FRAME_TRANSMISSION_ACK,
-                stream_id=stream_id,
-                transmission_id=txid,
-                receiver_timestamp_us=retry.timestamp_us(),
-            )
+        self.pending_confirmation_txids.add(txid)
+        await self.flush_pending_confirmations(preferred=reply.carrier_id)
 
     async def receive_loop(self, carrier: Carrier) -> None:
         try:
@@ -1517,26 +1619,9 @@ class Gate2Session:
 
         if frame_type == FRAME_CREDIT_PROBE:
             stream_id = int(fields["stream_id"])
-            if stream_id != 0:
-                stream = self.streams.get(stream_id)
-                if stream is not None:
-                    reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-                    await self.send_frame(
-                        reply,
-                        FRAME_STREAM_CREDIT,
-                        stream_id=stream_id,
-                        consumed_offset=0,
-                        maximum_offset=stream.local_maximum,
-                    )
-                    self.stream_credit_refreshes += 1
             reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-            await self.send_frame(
-                reply,
-                FRAME_SESSION_CREDIT,
-                consumed_bytes=0,
-                maximum_bytes=self.session_local_maximum,
-            )
-            self.session_credit_refreshes += 1
+            self.pending_credit_stream_ids.add(stream_id)
+            await self.flush_pending_credit_responses(preferred=reply.carrier_id)
             return
 
         if frame_type == FRAME_PING:
@@ -1949,13 +2034,13 @@ class Gate2Session:
             opening = self.opening_tombstones.get(stream_id)
             if opening is not None:
                 self.register_peer_tx(FRAME_STOP_SENDING, fields)
-                await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
                 reset_txid = opening.get("reset_txid")
                 if opening.get("decision") == "preopen-stop" and isinstance(reset_txid, int):
                     reset_tx = self.local_tx.get(reset_txid)
                     if reset_tx is not None and not reset_tx.settled:
-                        reply = self.choose_carrier()
-                        await self.send_tx(reset_tx, reply, reinjection=reset_tx.attempts > 0)
+                        self.queue_response_tx(reset_tx)
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+                await self.flush_pending_response_tx()
                 return
             if stream_id in self.retired_stream_ids:
                 if await self.replay_retired_reliable(incoming, FRAME_STOP_SENDING, fields):
@@ -1974,10 +2059,9 @@ class Gate2Session:
                     "terminal_txid": txid,
                     "reset_txid": reset_tx.txid,
                 }
+                self.queue_response_tx(reset_tx)
                 await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
-                if not reset_tx.settled:
-                    reply = self.choose_carrier()
-                    await self.send_tx(reset_tx, reply, reinjection=duplicate or reset_tx.attempts > 0)
+                await self.flush_pending_response_tx()
                 return
             raise StreamStateError("STOP_SENDING for unknown Stream")
         if stream.lifecycle == "OPENING" and not stream.accepted:
@@ -2007,11 +2091,11 @@ class Gate2Session:
             stream.local_terminal_txid = reset_tx.txid
             stream.stream_error_code = int(fields["stream_error_code"])
 
-        await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
         if reset_tx is not None and not reset_tx.settled:
-            reset_reply = reply if self.carrier_is_current(reply, require_output=True) else self.choose_carrier()
-            await self.send_tx(reset_tx, reset_reply, reinjection=duplicate or reset_tx.attempts > 0)
-            stream.reset_sent_event.set()
+            self.queue_response_tx(reset_tx)
+        await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+        preferred_reset = reply.carrier_id if self.carrier_is_current(reply, require_output=True) else None
+        await self.flush_pending_response_tx(preferred=preferred_reset)
 
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
         if self.state != "ACTIVE":
@@ -2074,16 +2158,19 @@ class Gate2Session:
         self.require_current_carrier(carrier)
         if type(data) is not bytes:
             raise TypeError("STREAM_DATA requires immutable bytes")
+        if len(data) == 0:
+            raise ValueError("STREAM_DATA requires at least one byte")
         if len(data) > self.peer_limits.max_frame_payload:
             raise ProtocolError("STREAM_DATA exceeds peer MAX_FRAME_PAYLOAD")
         if stream.send_offset + len(data) > stream.peer_maximum:
             raise FlowControlError("local sender lacks Stream credit")
         if self.session_send_committed + len(data) > self.session_peer_maximum:
             raise FlowControlError("local sender lacks Session credit")
+        preview_txid = self.require_tx_allocation_available()
         preview_body = frame_body(
             FRAME_STREAM_DATA,
             stream_id=stream.stream_id,
-            transmission_id=self.next_txid,
+            transmission_id=preview_txid,
             offset=stream.send_offset,
             data=data,
         )

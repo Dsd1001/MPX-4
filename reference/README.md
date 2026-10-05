@@ -51,7 +51,9 @@ Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5
 
 `interop/review_followup.py` adds **11 case classes / 22 total A/B executions** from the independent 77ed0e1 replay: terminal Client late-JOIN installation, pre-open STOP response persistence, cross-Carrier response-output fault attribution and recovery, immutable DATA payload ownership, and fail-atomic oversized DATA rejection, paired with five normal controls.
 
-Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both model-zero 121-case profiles, **286 authenticated endpoint executions** (200 baseline + 86 formerly-model-only), thirty-six target-witnessed sensitivity mutations, 52 unmutated sensitivity baselines, two oracle negative controls, **20 review-v2 A/B executions**, **18 update-review A/B executions**, **22 independent follow-up A/B executions**, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes. J5 exercises the actual CLI Server process: an invalid candidate Finished must close only that candidate while the established Carrier and listener remain usable.
+`interop/review_b66.py` adds **10 case classes / 20 total A/B executions** for the b66 replay: CREDIT_PROBE recovery in Client and Server roles, one/two-output-failure ACK+RESET progress, direct/public Transmission-ID exhaustion closure, and 0/1-byte DATA controls.
+
+Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both model-zero 121-case profiles, **286 authenticated endpoint executions** (200 baseline + 86 formerly-model-only), thirty-six target-witnessed sensitivity mutations, 52 unmutated sensitivity baselines, two oracle negative controls, **20 review-v2 A/B executions**, **18 update-review A/B executions**, **22 independent follow-up A/B executions**, **20 b66 follow-up A/B executions**, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes. J5 exercises the actual CLI Server process: an invalid candidate Finished must close only that candidate while the established Carrier and listener remain usable.
 
 The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. No Mandatory case is model-only, but 18 codec and 30 cross-wire cases remain deliberately classified by their correct executable surface rather than being mislabeled endpoint-wire. Passing these gates also does not itself declare Protocol Version 4 stable.
 
@@ -107,6 +109,7 @@ Run authenticated endpoint conformance and sensitivity controls:
     python -m interop.review_v2 --out-dir /tmp/mpx4-review-v2
     python -m interop.review_update --out-dir /tmp/mpx4-review-update
     python -m interop.review_followup --out-dir /tmp/mpx4-review-followup
+    python -m interop.review_b66 --out-dir /tmp/mpx4-review-b66
 
 Run the model-zero 121-case Mandatory profile:
 
@@ -148,6 +151,6 @@ Current gate status:
 - **Gate 1: PASS** — reference Client ↔ reference Server positive real-TCP integration, direct and fragmented;
 - **Gate 2: PASS** — deterministic multi-Carrier/fault/recovery scenario suite, direct and fragmented;
 - **Gate 3 profile: PASS** — 121/121 case IDs with **0 model-only**; evidence split is 18 codec + 30 cross-wire + 73 endpoint-wire;
-- **Gate 4 aggregate: PASS** — source-isolated A/B role reversal plus 286 authenticated endpoint executions, thirty-six target-witnessed sensitivity controls with 52 baselines and two oracle negative controls, 20 review-v2 concurrency/output/progress executions, retained first-arrival/lifecycle replay validation, CLI candidate-isolation coverage, and direct/fragmented cross-fault evidence.
+- **Gate 4 aggregate: PASS** — source-isolated A/B role reversal plus 286 authenticated endpoint executions, thirty-six target-witnessed sensitivity controls with 52 baselines and two oracle negative controls, 20 review-v2 concurrency/output/progress executions, 18 update-review, 22 independent follow-up, 20 b66 pending-response/DATA-boundary executions, retained first-arrival/lifecycle replay validation, CLI candidate-isolation coverage, and direct/fragmented cross-fault evidence.
 
 The repository now has executable evidence for every Draft 11 Mandatory case without a model-only fallback. This is still not a third-party independence claim, and it does not mean all 121 cases are endpoint-wire tests. Protocol Version 4 remains a development version until a separate Stability Declaration is made.
