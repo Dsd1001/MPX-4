@@ -685,9 +685,15 @@ class Gate3:
             check(wire.hex() == item["wire_hex"] and code in allowed, item)
         self.case("B14", f"{len(hr['encoding_cases'])} HANDSHAKE_REJECT Core encodings reproduced; candidate-only error set enforced")
 
-        transcript = bytes.fromhex(inp["connection_preface_hex"]) + bytes.fromhex(inp["client_init_hex"]) + bytes.fromhex(inp["server_init_hex"])
+        preface = bytes.fromhex(inp["connection_preface_hex"])
+        client_init = bytes.fromhex(inp["client_init_hex"])
+        server_init = bytes.fromhex(inp["server_init_hex"])
+        transcript = preface + client_init + server_init
         check(hashlib.sha256(transcript).hexdigest() == der["h0_hex"], "H0 transcript")
-        check(b"\x06" not in b"", "reject not synthesized into successful transcript")
+        client_type, _ = core.vi_dec(client_init)
+        server_type, _ = core.vi_dec(server_init)
+        check(client_type == core.MSG_CLIENT_INIT and server_type == core.MSG_SERVER_INIT, "successful transcript message types")
+        check(client_type != 0x06 and server_type != 0x06, "HANDSHAKE_REJECT cannot be a successful transcript component")
         self.case("B15", "successful canonical H0/H1/H2 reproduced from Preface/INIT/Finished only; HANDSHAKE_REJECT absent")
 
         retained = {"001122": "DORMANT"}

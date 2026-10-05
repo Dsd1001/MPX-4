@@ -849,7 +849,9 @@ If newly received data overlaps byte positions already accepted for the same Str
 
 Advancing a Stream's Consumed Offset releases receive-side flow-control accounting; by itself it does **not** release this byte-identity obligation. While later STREAM_DATA for an already accepted range remains eligible for Section 15.1 overlap processing, the receiver MUST retain the exact bytes or equivalent comparison evidence sufficient to detect conflicting octets. Equivalent evidence MAY be stored in a compact or external representation and need not keep application buffers resident.
 
-An implementation that can no longer retain sufficient comparison evidence MUST NOT silently treat arbitrary low-offset STREAM_DATA as valid merely because the bytes are below Consumed Offset. It MUST either retain enough evidence until a protocol state makes such traffic unambiguously stale/without semantic effect under the terminal/retired Stream rules, or apply a local resource policy that safely terminates the affected scope before the evidence is discarded. This is a receive-state/resource requirement and does not change flow-control credit accounting.
+For an accepted Stream, Section 15.1 overlap-comparison eligibility ends once the Stream validly enters TOMBSTONE under the state supplement: the receive direction is terminal, receive-side accounting has been fully released through the peer Final Offset, and the applicable FIN/RESET completion conditions have been met. From that point, a first-arriving or duplicate STREAM_DATA wholly within the recorded peer Final Offset is unambiguously stale and has no application or credit effect; it need not be byte-compared against released application data. This does **not** release any independent reliable-Transmission confirmation obligation for an unretired Transmission ID. Before TOMBSTONE entry, including an active terminal Stream, conflicting overlap remains PROTOCOL_VIOLATION.
+
+An implementation that can no longer retain sufficient comparison evidence MUST NOT silently treat arbitrary low-offset STREAM_DATA as valid merely because the bytes are below Consumed Offset. It MUST either retain enough evidence until the Stream validly enters TOMBSTONE (or another protocol state makes such traffic unambiguously stale/without semantic effect), or apply a local resource policy that safely terminates the affected scope before the evidence is discarded. This is a receive-state/resource requirement and does not change flow-control credit accounting.
 
 Duplicate data MUST NOT be delivered to the application more than once.
 
@@ -1198,7 +1200,7 @@ In particular, conforming implementations MUST support:
 - idempotent processing of duplicate reliable Frames;
 - immutable final-size semantics;
 - tombstone retention sufficient to prevent Stream-ID reuse;
-- compact retired identities only after peer TRANSMISSION_RETIRE has made confirmation-replay state unnecessary.
+- compact tombstones into retired identities only after each still-unretired peer reliable Transmission is either covered by peer TRANSMISSION_RETIRE or has equivalent confirmation-replay state retained at Session scope or elsewhere outside the compacted Stream state.
 
 An implementation MAY use different internal state names or data structures, but its externally observable behavior MUST conform to the state supplement.
 

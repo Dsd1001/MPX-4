@@ -50,6 +50,8 @@ jobs:
         run: python -m interop.review_followup --out-dir "$RUNNER_TEMP/mpx4-review-followup"
       - name: b66 pending-response and DATA boundary regressions
         run: python -m interop.review_b66 --out-dir "$RUNNER_TEMP/mpx4-review-b66"
+      - name: Stable-audit handshake and cancellation closure regressions
+        run: python -m interop.review_stable --out-dir "$RUNNER_TEMP/mpx4-review-stable"
       - name: Reference Gate 3 model-zero Mandatory profile
         run: python -m reference.gate3_harness --out-dir "$RUNNER_TEMP/mpx4-gate3"
       - name: Independent implementation canonical self-test

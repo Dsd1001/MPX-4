@@ -102,6 +102,11 @@ async def expect_case_failure(
                 f"{implementation}/{case_name} failed before target mutation branch {witness.label} was reached: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
+        if isinstance(exc, OSError) and not isinstance(exc, TimeoutError):
+            raise SensitivityError(
+                f"{implementation}/{case_name} hit target mutation branch {witness.label} but then failed with "
+                f"infrastructure error: {type(exc).__name__}: {exc}"
+            ) from exc
         return {
             "failure_type": type(exc).__name__,
             "failure": str(exc),
@@ -160,6 +165,34 @@ async def run_oracle_negative_controls() -> List[dict]:
             )
         else:
             raise SensitivityError("unrelated setup failure was incorrectly accepted as mutation detection")
+
+        post_witness = MutationWitness("negative-control-post-target-infrastructure")
+        async def unrelated_post_target_failure(*args, **kwargs):
+            post_witness.mark()
+            raise OSError("NEGATIVE CONTROL: unrelated infrastructure failure after target witness")
+        try:
+            await expect_case_failure(
+                implementation,
+                "retired-fin-confirmation-replay",
+                role="server",
+                witness=post_witness,
+                runner=unrelated_post_target_failure,
+            )
+        except SensitivityError as exc:
+            message = str(exc)
+            if "infrastructure error" not in message:
+                raise
+            results.append(
+                {
+                    "implementation": implementation,
+                    "status": "PASS",
+                    "handler_reached": True,
+                    "classification": "ERROR/INCONCLUSIVE",
+                    "reason": message,
+                }
+            )
+        else:
+            raise SensitivityError("post-target infrastructure failure was incorrectly accepted as mutation detection")
     return results
 
 
@@ -890,7 +923,7 @@ async def amain() -> dict:
         "claim": (
             "Unmutated guard scenarios pass first; every listed real-runtime mutation must "
             "reach its target branch before the guarded endpoint-wire case fails; unrelated "
-            "pre-handler setup failures are classified ERROR/INCONCLUSIVE rather than mutation detection."
+            "infrastructure failures are classified ERROR/INCONCLUSIVE both before and after target witness rather than mutation detection."
         ),
     }
 

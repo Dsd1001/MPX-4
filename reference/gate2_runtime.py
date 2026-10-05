@@ -269,6 +269,7 @@ class Gate2Session:
         self.pending_confirmation_txids: Set[int] = set()
         self.pending_response_txids: Set[int] = set()
         self.pending_credit_stream_ids: Set[int] = set()
+        self.pending_work_tasks: Set[asyncio.Task[None]] = set()
         self.settled_through = 0
         self.last_retire_advertised = 0
         self.retire_task: Optional[asyncio.Task[None]] = None
@@ -734,6 +735,28 @@ class Gate2Session:
                 **carrier.base_trace(),
                 stream_id=stream_id,
             )
+
+    def start_pending_response_flush(self, preferred: Optional[int] = None) -> asyncio.Task[None]:
+        task = asyncio.create_task(self.flush_pending_response_tx(preferred=preferred))
+        self.pending_work_tasks.add(task)
+
+        def done(completed: asyncio.Task[None]) -> None:
+            self.pending_work_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            try:
+                exc = completed.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None:
+                self.trace.emit(
+                    "pending_work_error",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
+        task.add_done_callback(done)
+        return task
 
     async def flush_pending_work(self) -> None:
         if self.state != "ACTIVE":
@@ -2184,7 +2207,11 @@ class Gate2Session:
         )
         self.session_send_committed += len(data)
         stream.send_offset += len(data)
-        await self.send_tx(tx, carrier)
+        # Allocation commits this reliable DATA to Session ownership. Queue it
+        # before the first output await so caller cancellation cannot orphan it.
+        self.queue_response_tx(tx)
+        flush_task = self.start_pending_response_flush(preferred=carrier.carrier_id)
+        await asyncio.shield(flush_task)
         return tx
 
     async def send_retire(self, carrier: Carrier) -> None:
@@ -2255,7 +2282,8 @@ class Gate2Session:
             await asyncio.wait_for(self.carrier_change_event.wait(), timeout=remain)
 
     async def cleanup(self) -> None:
-        tasks = list(self.carrier_tasks.values())
+        tasks = list(self.carrier_tasks.values()) + list(self.pending_work_tasks)
+        self.pending_work_tasks.clear()
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -2690,6 +2718,17 @@ async def server_handshake(
 async def server_main(session: Gate2Session, args: argparse.Namespace, key: bytes) -> Dict[str, object]:
     connection_tasks: Set[asyncio.Task[None]] = set()
 
+    async def close_candidate_writer(writer: asyncio.StreamWriter) -> None:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError as exc:
+            session.trace.emit(
+                "candidate_close_transport_error",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
     async def worker(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             await server_handshake(session, reader, writer, key)
@@ -2699,17 +2738,15 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
                 error_code=exc.error_code,
                 reason=str(exc),
             )
-            writer.close()
-            await writer.wait_closed()
-        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError, asyncio.TimeoutError) as exc:
+            await close_candidate_writer(writer)
+        except (AuthenticationError, ProtocolError, asyncio.IncompleteReadError, asyncio.TimeoutError, OSError) as exc:
             session.trace.emit(
                 "candidate_handshake_failed",
                 error_type=type(exc).__name__,
                 error=str(exc),
                 session_preserved=session.session_id is not None,
             )
-            writer.close()
-            await writer.wait_closed()
+            await close_candidate_writer(writer)
         except Exception as exc:
             session.fatal_error = f"{type(exc).__name__}: {exc}"
             session.trace.emit(
@@ -2717,9 +2754,10 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
-            writer.close()
-            await writer.wait_closed()
-            session.done_event.set()
+            try:
+                await close_candidate_writer(writer)
+            finally:
+                session.done_event.set()
 
     def callback(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.create_task(worker(reader, writer))

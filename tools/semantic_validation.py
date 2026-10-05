@@ -232,7 +232,12 @@ def validate_carrier_generation(root,check):
         elif n=='higher-generation-before-authentication':
             _expect(check,c,'no_generation_change'); check(c['current_generation']==c['highest_accepted_generation'],c)
         elif n=='failed-higher-generation-handshake':
-            _expect(check,c,'reject_candidate'); check(c['highest_accepted_generation_after']==c['highest_accepted_generation'],c)
+            h=_i(c['highest_accepted_generation']); g=_i(c['candidate_generation']); result=c['candidate_result']
+            actual='replace' if g>h and result=='established' else 'reject_candidate'
+            _expect(check,c,actual)
+            expected_after=g if actual=='replace' else h
+            check(_i(c['highest_accepted_generation_after'])==expected_after,c)
+            check(_i(c.get('current_generation_after', expected_after))==expected_after,c)
         elif n in {'stale-lower-generation','equal-generation-live-conflict','equal-generation-after-loss-still-conflict'}:
             h=_i(c['highest_accepted_generation']); g=_i(c['candidate_generation'])
             _expect(check,c,'reject_candidate' if g<=h else 'replace'); check(c['error']=='CARRIER_CONFLICT',c)
@@ -243,7 +248,12 @@ def validate_carrier_generation(root,check):
         elif n=='processed-old-record-before-commit-remains-applied': _expect(check,c,'retain_applied_effect')
         elif n=='replacement-preserves-transmission-id': check(c['expected_transmission_id']==c['outstanding_transmission_id'],c)
         elif n=='simultaneous-equal-generation-candidates':
-            check(c['candidate_generations'][0]==c['candidate_generations'][1],c); _expect(check,c,['accept_generation_5','reject_candidate']); check(c['error_for_later']=='CARRIER_CONFLICT',c)
+            h=_i(c['highest_accepted_generation']); gens=[_i(x) for x in c['candidate_generations']]
+            check(len(gens)==2 and gens[0]==gens[1],c)
+            g=gens[0]
+            actual=[f'accept_generation_{g}','reject_candidate'] if g>h else ['reject_candidate','reject_candidate']
+            _expect(check,c,actual)
+            check(c['error_for_later']=='CARRIER_CONFLICT',c)
         elif n=='later-still-higher-candidate': check(c['expected_highest_accepted_generation']==max(c['candidate_generations']),c)
         elif n=='maximum-generation-no-wrap': _expect(check,c,'no_valid_higher_generation' if _i(c['highest_accepted_generation'])==MAX_VARINT else 'replace')
         elif n=='join-during-session-closing': _expect(check,c,'reject_candidate' if c['session_state']=='CLOSING' else 'accept')

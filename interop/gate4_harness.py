@@ -29,7 +29,38 @@ from typing import Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = tuple("ABCDEFGHIJKL")
-MANDATORY_COUNT = 121
+MANDATORY_IDS = tuple(
+    [f"A{i}" for i in range(1, 6)]
+    + [f"B{i}" for i in range(1, 18)]
+    + [f"C{i}" for i in range(1, 8)]
+    + [f"D{i}" for i in range(1, 11)]
+    + [f"E{i}" for i in range(1, 11)]
+    + [f"F{i}" for i in range(1, 9)]
+    + [f"G{i}" for i in range(1, 7)]
+    + [f"H{i}" for i in range(1, 6)]
+    + [f"I{i}" for i in range(1, 7)]
+    + [f"J{i}" for i in range(1, 17)]
+    + [f"K{i}" for i in range(1, 7)]
+    + [f"L{i}" for i in range(1, 26)]
+)
+MANDATORY_COUNT = len(MANDATORY_IDS)
+CODEC_IDS = {
+    "A1", "A2", "A4", "A5",
+    "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B14", "B15",
+    "L1", "L2", "L3",
+}
+CROSS_WIRE_IDS = {
+    "A3", "B1", "B17",
+    "C1", "C2", "C3", "C4", "C5", "C6",
+    "D1", "D2", "D4", "D5",
+    "E1", "E2", "E3", "E5", "E9",
+    "F1", "F7", "G4", "G5",
+    "J1", "J2", "J3", "J4", "J12", "J13", "J14", "J16",
+}
+EXPECTED_EVIDENCE = {
+    case_id: ("codec" if case_id in CODEC_IDS else "cross-wire" if case_id in CROSS_WIRE_IDS else "endpoint-wire")
+    for case_id in MANDATORY_IDS
+}
 
 
 class Gate4Error(RuntimeError):
@@ -145,15 +176,25 @@ def verify_profile(report: dict, label: str) -> dict:
     check(all(c.get("status") == "PASS" for c in cases), f"{label} case failure")
     ids = [c.get("id") for c in cases]
     check(len(set(ids)) == MANDATORY_COUNT, f"{label} duplicate case ID")
+    check(set(ids) == set(MANDATORY_IDS), f"{label} Mandatory ID set mismatch")
+    check(all(c.get("id", "")[:1] in GROUPS for c in cases), f"{label} invalid Mandatory family")
+    actual_by_id = {c["id"]: c.get("evidence_class") for c in cases}
+    check(actual_by_id == EXPECTED_EVIDENCE, f"{label} per-case evidence mapping mismatch")
+    recomputed_counts = {
+        name: sum(1 for evidence in actual_by_id.values() if evidence == name)
+        for name in ("model", "codec", "endpoint-wire", "cross-wire")
+    }
     evidence_counts = report.get("evidence_counts") or {}
-    check(set(evidence_counts) == {"model", "codec", "endpoint-wire", "cross-wire"}, f"{label} evidence classes")
-    check(sum(int(v) for v in evidence_counts.values()) == MANDATORY_COUNT, f"{label} evidence count total")
+    check(set(evidence_counts) == set(recomputed_counts), f"{label} evidence classes")
+    check({k: int(v) for k, v in evidence_counts.items()} == recomputed_counts, f"{label} evidence summary mismatch")
     model_only = report.get("model_only_case_ids") or []
     endpoint_ids = report.get("endpoint_wire_mandatory_case_ids") or []
-    check(len(model_only) == int(evidence_counts["model"]), f"{label} model-only count")
-    check(not model_only and int(evidence_counts["model"]) == 0, f"{label} still has model-only Mandatory cases")
-    check(len(endpoint_ids) == int(evidence_counts["endpoint-wire"]), f"{label} endpoint-wire count")
-    check(int(evidence_counts["endpoint-wire"]) == 73, f"{label} endpoint-wire Mandatory count")
+    expected_model = sorted(case_id for case_id, evidence in actual_by_id.items() if evidence == "model")
+    expected_endpoint = sorted(case_id for case_id, evidence in actual_by_id.items() if evidence == "endpoint-wire")
+    check(sorted(model_only) == expected_model, f"{label} model-only ID list mismatch")
+    check(not expected_model, f"{label} still has model-only Mandatory cases")
+    check(sorted(endpoint_ids) == expected_endpoint, f"{label} endpoint-wire ID list mismatch")
+    check(recomputed_counts["endpoint-wire"] == 73, f"{label} endpoint-wire Mandatory count")
     check(int(report.get("endpoint_wire_execution_count") or 0) >= 91, f"{label} endpoint-wire executions")
     return {
         "status": "PASS",
@@ -249,6 +290,7 @@ def execute(out_dir: Path) -> dict:
     review_update_dir = out_dir / "review-update"
     review_followup_dir = out_dir / "review-followup"
     review_b66_dir = out_dir / "review-b66"
+    review_stable_dir = out_dir / "review-stable"
     run([
         sys.executable,
         "-m",
@@ -282,7 +324,7 @@ def execute(out_dir: Path) -> dict:
     check(sensitivity.get("baseline_status") == "PASS", "endpoint sensitivity baseline controls failed")
     check(sensitivity.get("baseline_control_count") == 52, "expected 52 unmutated sensitivity baselines")
     check(sensitivity.get("negative_control_status") == "PASS", "endpoint sensitivity oracle negative controls failed")
-    check(sensitivity.get("negative_control_count") == 2, "expected two sensitivity oracle negative controls")
+    check(sensitivity.get("negative_control_count") == 4, "expected four sensitivity oracle negative controls")
     check(sensitivity.get("control_count") == 36, "expected thirty-six deliberate-defect sensitivity controls")
 
     run([
@@ -332,6 +374,18 @@ def execute(out_dir: Path) -> dict:
     check(review_b66.get("status") == "PASS", "b66 independent-review regression failed")
     check(review_b66.get("case_count") == 10, "expected ten b66 review case classes")
     check(review_b66.get("execution_count") == 20, "expected twenty b66 A/B executions")
+
+    run([
+        sys.executable,
+        "-m",
+        "interop.review_stable",
+        "--out-dir",
+        str(review_stable_dir),
+    ])
+    review_stable = read(review_stable_dir / "review-stable-report.json")
+    check(review_stable.get("status") == "PASS", "stable-audit closure regression failed")
+    check(review_stable.get("case_count") == 6, "expected six stable-audit case classes")
+    check(review_stable.get("execution_count") == 10, "expected ten stable-audit executions")
 
     basic = []
     faults = []
@@ -395,6 +449,11 @@ def execute(out_dir: Path) -> dict:
             "case_count": review_b66["case_count"],
             "execution_count": review_b66["execution_count"],
         },
+        "review_stable_regression": {
+            "status": review_stable["status"],
+            "case_count": review_stable["case_count"],
+            "execution_count": review_stable["execution_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
@@ -413,10 +472,11 @@ def execute(out_dir: Path) -> dict:
         "claim": (
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
             "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, thirty-six target-witnessed "
-            "sensitivity mutations after 52 unmutated baselines and two oracle negative controls, twenty A/B executions covering ten "
+            "sensitivity mutations after 52 unmutated baselines and four oracle negative controls, twenty A/B executions covering ten "
             "review-v2 regressions, eighteen A/B executions covering nine update-review classes, twenty-two A/B executions "
-            "covering the independent follow-up lifecycle/output/API counterexamples and controls, and twenty b66 review executions "
-            "covering pending-response progress plus DATA namespace/lower-bound controls all pass; "
+            "covering the independent follow-up lifecycle/output/API counterexamples and controls, twenty b66 review executions "
+            "covering pending-response progress plus DATA namespace/lower-bound controls, and ten stable-audit closure executions "
+            "covering optional handshake parameters, post-commit DATA cancellation handoff, Generation-oracle inputs, and Gate 4 profile validation all pass; "
             "A/B real-TCP role reversal passes the basic and five fault profiles "
             "in direct and fragmented modes."
         ),
@@ -450,6 +510,7 @@ def main() -> int:
             f"review-update={report['review_update_regression']['execution_count']}, "
             f"review-followup={report['review_followup_regression']['execution_count']}, "
             f"review-b66={report['review_b66_regression']['execution_count']}, "
+            f"review-stable={report['review_stable_regression']['execution_count']}, "
             f"{report['cross_basic_run_count']} cross-basic, "
             f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
         )

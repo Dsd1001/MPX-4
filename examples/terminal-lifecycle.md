@@ -101,10 +101,10 @@ No application object is recreated.
 
 ## 6. Retired identity
 
-After terminal reliability is fully settled, detailed tombstone state can be compacted.
+After the Stream validly reaches TOMBSTONE, application byte-comparison evidence for data wholly within the recorded peer Final Offset may be released because such DATA is now unambiguously stale. Confirmation replay is separate: detailed tombstone state can be compacted only when each still-unretired peer reliable Transmission is covered by peer TRANSMISSION_RETIRE or equivalent replay state has been retained outside the Stream object.
 
 The implementation must still remember that Stream ID 1 has already been used.
 
-A later Frame for that retired identity cannot create a Stream, consume new credit, or deliver application data.
+A later Frame for that retired identity cannot create a Stream, consume new credit, or deliver application data. A stale reliable Frame that is not yet covered by peer TRANSMISSION_RETIRE still receives its retained confirmation even if exact application bytes have already been released.
 
-When detailed state has been discarded, such stale traffic may be ignored.
+When both semantic and confirmation obligations have been released by the rules above, remaining stale traffic may be ignored.

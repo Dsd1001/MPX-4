@@ -289,8 +289,12 @@ def parse_client_init(raw_message: bytes) -> InitContext:
         PARAM_MAX_STREAMS,
         PARAM_MAX_CARRIERS,
     }
-    if set(params) != required:
-        raise ProtocolError(f"unexpected CLIENT_INIT Parameter set: {sorted(params)}")
+    missing = required - set(params)
+    if missing:
+        raise ProtocolError(f"missing CLIENT_INIT Parameters: {sorted(missing)}")
+    unknown_critical = sorted(ptype for ptype, (flags, _) in params.items() if ptype not in required and (flags & 0x01))
+    if unknown_critical:
+        raise ProtocolError(f"unsupported critical CLIENT_INIT Parameters: {unknown_critical}")
     session_id = params[PARAM_SESSION_ID][1]
     client_nonce = params[PARAM_CLIENT_NONCE][1]
     if len(session_id) != 16 or session_id == b"\x00" * 16:
@@ -350,8 +354,12 @@ def parse_server_init(raw_message: bytes) -> Tuple[bytes, Limits]:
         PARAM_MAX_STREAMS,
         PARAM_MAX_CARRIERS,
     }
-    if set(params) != required:
-        raise ProtocolError(f"unexpected SERVER_INIT Parameter set: {sorted(params)}")
+    missing = required - set(params)
+    if missing:
+        raise ProtocolError(f"missing SERVER_INIT Parameters: {sorted(missing)}")
+    unknown_critical = sorted(ptype for ptype, (flags, _) in params.items() if ptype not in required and (flags & 0x01))
+    if unknown_critical:
+        raise ProtocolError(f"unsupported critical SERVER_INIT Parameters: {unknown_critical}")
     if params[PARAM_MAX_CARRIERS][0] != 1:
         raise ProtocolError("MAX_CARRIERS must be critical")
     nonce = params[PARAM_SERVER_NONCE][1]

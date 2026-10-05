@@ -290,8 +290,12 @@ def parse_client_init(raw: bytes) -> InitContext:
         PARAM_MAX_STREAMS,
         PARAM_MAX_CARRIERS,
     }
-    if set(p) != required:
-        raise ProtocolError("CLIENT_INIT Parameter set")
+    missing = required - set(p)
+    if missing:
+        raise ProtocolError("CLIENT_INIT missing required Parameter")
+    unknown_critical = [ptype for ptype, (flags, _) in p.items() if ptype not in required and (flags & 0x01)]
+    if unknown_critical:
+        raise ProtocolError("CLIENT_INIT unsupported critical Parameter")
     if p[PARAM_MAX_CARRIERS][0] != 1:
         raise ProtocolError("MAX_CARRIERS criticality")
     sid = p[PARAM_SESSION_ID][1]
@@ -336,7 +340,11 @@ def parse_server_init(raw: bytes) -> Tuple[bytes, Limits]:
         PARAM_MAX_STREAMS,
         PARAM_MAX_CARRIERS,
     }
-    if set(p) != required or p[PARAM_MAX_CARRIERS][0] != 1:
+    missing = required - set(p)
+    if missing:
+        raise ProtocolError("SERVER_INIT missing required Parameter")
+    unknown_critical = [ptype for ptype, (flags, _) in p.items() if ptype not in required and (flags & 0x01)]
+    if unknown_critical or p[PARAM_MAX_CARRIERS][0] != 1:
         raise ProtocolError("SERVER_INIT Parameter set/criticality")
     nonce = p[PARAM_SERVER_NONCE][1]
     if len(nonce) != 32:

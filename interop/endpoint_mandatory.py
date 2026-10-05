@@ -20,6 +20,7 @@ import json
 import os
 import secrets
 import socket
+import struct
 import sys
 import tempfile
 import time
@@ -939,10 +940,32 @@ async def cli_failed_candidate_preserves_established_session(implementation: str
             await asyncio.sleep(0.10)
             check(proc.returncode is None, f"CLI server exited after failed candidate: {proc.returncode}")
             await helper.ping(peer, 0x1503)
+
+            # A transport reset before authentication is candidate-local. It must
+            # not poison session.fatal_error or make a later graceful Session close fail.
+            _, rst_writer = await asyncio.open_connection("127.0.0.1", helper.port)
+            rst_socket = rst_writer.get_extra_info("socket")
+            check(rst_socket is not None, "RST candidate socket unavailable")
+            rst_socket.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            rst_writer.transport.abort()
+            await asyncio.sleep(0.10)
+            check(proc.returncode is None, f"CLI server exited after unauthenticated RST: {proc.returncode}")
+            await helper.ping(peer, 0x1504)
+
+            await peer.carrier.send_frame(
+                helper.core.FRAME_SESSION_CLOSE,
+                error_code=0,
+                trigger_frame_type=0,
+                reason="candidate-rst-regression",
+            )
+            rc = await asyncio.wait_for(proc.wait(), timeout=3)
+            check(rc == 0, f"CLI server graceful exit after candidate RST returned {rc}")
             return {
                 "candidate_closed": True,
+                "rst_candidate_isolated": True,
                 "server_still_running": True,
                 "retained_carrier_ping": True,
+                "graceful_exit": True,
             }
         finally:
             if peer is not None:
