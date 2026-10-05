@@ -9,6 +9,8 @@ This directory orchestrates tests between the two executable implementations wit
 - endpoint_wire.py — drives the real A/B Session runtimes over loopback TCP with full CREATE/Finished and authenticated Secure Records. In addition to flow-control, terminal, reassembly and error-scope checks, it covers legal PADDING and extension skipping, Session-scoped unknown Core Frames, pre-open Stream-ID validation, immutable STREAM_OPEN decisions/rejection reasons, terminal tombstone STOP_SENDING, and confirmation replay after retained state is compacted into a retired identity.
 - endpoint_mandatory.py — executes the previously model-only Mandatory requirements against the real runtimes: version/reject handling, identifier exhaustion, Carrier capacity/replacement, reliable confirmation retirement, opening/cancellation races, tombstones, DORMANT retirement, candidate concurrency, and TCP/close behavior. It contributes 43 executions per implementation / 86 total and covers 42 unique Mandatory IDs.
 - endpoint_sensitivity.py — deliberately breaks eighteen real handler contracts in each implementation. Every guard has an unmutated baseline, every mutation must hit its target branch before failure counts as detection, and two oracle negative controls prove unrelated pre-handler setup failures are ERROR/INCONCLUSIVE. The controls cover the earlier flow-control/reassembly/tombstone/F1–F8 regressions plus cross-Carrier reject commit ordering and retired first-arrival recovery.
+- review_v2.py — preserves the earlier 10-class / 20-execution review-v2 concurrency/output/progress evidence.
+- review_update.py — adds 9 case classes / 18 A/B executions for the update review: post-Finished stale installation, STOP default-RESET persistence across ACK output failure, exact retirement-prefix accounting, key-exhaustion failover, and paired normal controls.
 - gate4_harness.py — aggregate Gate 4 runner.
 
 ## Gate 4 requirements enforced by the aggregate runner
@@ -21,12 +23,13 @@ Gate 4 aggregate is PASS only when:
 4. The baseline authenticated endpoint-wire suite passes **200 executions** across A/B and Client/Server roles (56 scenarios with explicit server-only/client-only applicability), including controlled cross-Carrier reject scheduling and post-compaction first-late reliable Frames.
 5. The formerly-model-only endpoint suite passes **86 executions** across A/B and covers 42 unique former model-only IDs; E4, F3, J7 and K6 reuse existing endpoint-wire cases.
 6. Thirty-six deliberate runtime defects are target-witnessed only after 52 unmutated baseline guards pass; two oracle negative controls prove unrelated pre-handler failures are not counted as mutation detection. J5 additionally verifies invalid candidate Finished isolation through the real CLI Server process.
-7. Implementation B passes an AST import audit and critical-handler structural comparison proving no runtime dependency on reference/, tools/, or validator modules and no AST-identical critical receive handlers.
-8. Reference Client → Independent Server and Independent Client → Reference Server pass the basic real-TCP profile.
-9. Both role directions pass all five fault/recovery scenarios.
-10. The cross-basic and cross-fault runs are repeated with endpoint writes fragmented to 257 bytes.
+7. The review-v2 suite passes 20 A/B executions and the update-review suite passes 18 A/B executions covering five remaining counterexamples plus four normal controls.
+8. Implementation B passes an AST import audit and critical-handler structural comparison proving no runtime dependency on reference/, tools/, or validator modules and no AST-identical critical receive handlers.
+9. Reference Client → Independent Server and Independent Client → Reference Server pass the basic real-TCP profile.
+10. Both role directions pass all five fault/recovery scenarios.
+11. The cross-basic and cross-fault runs are repeated with endpoint writes fragmented to 257 bytes.
 
-The aggregate therefore contains **286 authenticated endpoint executions**, thirty-six target-witnessed sensitivity controls after 52 unmutated baselines and two oracle negative controls, four cross-basic executions, and twenty cross-fault scenario executions. No Mandatory case is model-only; codec and cross-wire remain the appropriate executable evidence for 48 of the 121 IDs.
+The aggregate therefore contains **286 authenticated endpoint executions**, thirty-six target-witnessed sensitivity controls after 52 unmutated baselines and two oracle negative controls, **20 review-v2 executions**, **18 update-review executions**, four cross-basic executions, and twenty cross-fault scenario executions. No Mandatory case is model-only; codec and cross-wire remain the appropriate executable evidence for 48 of the 121 IDs.
 
 ## Independence boundary
 

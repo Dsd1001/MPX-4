@@ -676,6 +676,11 @@ class Carrier:
             if not self.output_usable:
                 raise ConnectionError("ordered Carrier output unavailable")
             if self.send_seq >= MAX_KEY_RECORDS:
+                self.output_usable = False
+                try:
+                    self.writer.close()
+                except Exception:
+                    pass
                 raise ProtocolError("record key limit")
             seq = self.send_seq
             header = b"\x00" + vi_enc(len(plaintext))

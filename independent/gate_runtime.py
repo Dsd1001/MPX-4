@@ -460,7 +460,7 @@ class IndependentSession:
         if not self.active_logical_ids and self.state not in {"CLOSING", "CLOSED"}:
             self.set_state("DORMANT", reason=reason)
 
-    async def add_carrier(self, carrier: Carrier, accepted_locally: bool = True) -> None:
+    async def add_carrier(self, carrier: Carrier, accepted_locally: bool = True) -> bool:
         if self.session_id is None:
             self.session_id = carrier.session_id
         if accepted_locally:
@@ -473,6 +473,25 @@ class IndependentSession:
                     raise RuntimeError("client-side Carrier commit exceeds Effective Carrier Limit")
             self.highest_accepted[carrier.carrier_id] = carrier.generation
             self.active_logical_ids.add(carrier.carrier_id)
+        else:
+            installable = (
+                self.state not in {"CLOSING", "CLOSED"}
+                and self.highest_accepted.get(carrier.carrier_id) == carrier.generation
+                and carrier.carrier_id in self.active_logical_ids
+            )
+            if not installable:
+                carrier.output_usable = False
+                self.trace.emit(
+                    "committed_carrier_install_discarded",
+                    **carrier.base_trace(),
+                    state=self.state,
+                    highest_accepted=self.highest_accepted.get(carrier.carrier_id),
+                )
+                try:
+                    carrier.writer.close()
+                except Exception:
+                    pass
+                return False
 
         old = self.carriers.get(carrier.carrier_id)
         if old is not None and old.generation < carrier.generation:
@@ -503,6 +522,7 @@ class IndependentSession:
         self.carrier_change_event.set()
         self.carrier_change_event = asyncio.Event()
         await self.refresh_after_establish(carrier)
+        return True
 
     async def refresh_after_establish(self, carrier: Carrier) -> None:
         await self.send_frame(
@@ -723,16 +743,16 @@ class IndependentSession:
                     return
                 try:
                     await self.send_retire(carrier)
+                except ProtocolError:
+                    if not carrier.output_usable:
+                        continue
+                    return
                 except (ConnectionError, BrokenPipeError, RuntimeError):
+                    if not carrier.output_usable:
+                        continue
                     return
         finally:
             self.retire_task = None
-            if self.state not in {"CLOSING", "CLOSED"} and self.last_retire_advertised < self.settled_through:
-                try:
-                    self.choose_carrier()
-                except RuntimeError:
-                    return
-                self.queue_retire_refresh()
 
     def peer_semantic(self, frame_type: int, fields: Dict[str, object]) -> Tuple[object, ...]:
         items = []
@@ -1810,6 +1830,25 @@ class IndependentSession:
             stream.accepted = True
         duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
+        stream.stop_received_event.set()
+        reset_tx: Optional[TxState] = None
+        if stream.send_terminal_mode == "RESET" and stream.local_terminal_txid is not None:
+            candidate = self.local_tx.get(stream.local_terminal_txid)
+            if candidate is not None and not candidate.settled:
+                reset_tx = candidate
+        elif not (stream.send_terminal_mode == "FIN" and stream.local_terminal_settled):
+            reset_final = stream.send_final if stream.send_final is not None else stream.send_offset
+            reset_tx = self.alloc_tx(
+                FRAME_RESET_STREAM,
+                stream_id,
+                final_offset=reset_final,
+                stream_error_code=int(fields["stream_error_code"]),
+            )
+            stream.send_final = reset_final
+            stream.send_terminal_mode = "RESET"
+            stream.local_terminal_txid = reset_tx.txid
+            stream.stream_error_code = int(fields["stream_error_code"])
+
         self.remember_ack(stream_id, txid)
         await self.send_frame(
             reply,
@@ -1818,23 +1857,8 @@ class IndependentSession:
             transmission_id=txid,
             receiver_timestamp_us=reply.timestamp_us(),
         )
-        stream.stop_received_event.set()
-        closed_direction = stream.send_terminal_mode == "RESET" or (
-            stream.send_terminal_mode == "FIN" and stream.local_terminal_settled
-        )
-        if not duplicate and not closed_direction:
-            reset_final = stream.send_final if stream.send_final is not None else stream.send_offset
-            tx = self.alloc_tx(
-                FRAME_RESET_STREAM,
-                stream_id,
-                final_offset=reset_final,
-                stream_error_code=int(fields["stream_error_code"]),
-            )
-            stream.send_final = reset_final
-            stream.send_terminal_mode = "RESET"
-            stream.local_terminal_txid = tx.txid
-            stream.stream_error_code = int(fields["stream_error_code"])
-            await self.send_tx(tx, reply)
+        if reset_tx is not None and not reset_tx.settled:
+            await self.send_tx(reset_tx, reply, reinjection=duplicate or reset_tx.attempts > 0)
             stream.reset_sent_event.set()
 
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
@@ -1914,16 +1938,17 @@ class IndependentSession:
         return tx
 
     async def send_retire(self, carrier: Carrier) -> None:
-        if self.settled_through <= 0:
+        advertised_through = self.settled_through
+        if advertised_through <= 0:
             return
         await self.send_frame(
             carrier,
             FRAME_TRANSMISSION_RETIRE,
-            retired_through=self.settled_through,
+            retired_through=advertised_through,
         )
         self.last_retire_advertised = max(
             self.last_retire_advertised,
-            self.settled_through,
+            advertised_through,
         )
 
     async def send_credit_probe(self, carrier: Carrier, stream_id: int) -> None:
@@ -2361,7 +2386,16 @@ async def server_handshake(
         **carrier.base_trace(),
         protocol_version=VERSION,
     )
-    await session.add_carrier(carrier, accepted_locally=False)
+    installed = await session.add_carrier(carrier, accepted_locally=False)
+    if not installed:
+        session.trace.emit(
+            "committed_candidate_install_lost",
+            session_id=init.session_id.hex(),
+            carrier_id=init.carrier_id,
+            generation=init.generation,
+            state=session.state,
+        )
+        return None
     return carrier
 
 

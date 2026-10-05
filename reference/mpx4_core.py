@@ -738,6 +738,15 @@ class Carrier:
             if not self.output_usable:
                 raise ConnectionError("Carrier ordered output is no longer usable")
             if self.send_seq >= MAX_KEY_RECORDS:
+                # Key usage exhaustion is an output-terminal condition for this
+                # Carrier incarnation.  Keeping it eligible would make callers
+                # retry the same impossible send forever and could starve a
+                # healthy alternate Carrier.
+                self.output_usable = False
+                try:
+                    self.writer.close()
+                except Exception:
+                    pass
                 raise ProtocolError("traffic key Record limit exhausted")
             seq = self.send_seq
             header = b"\x00" + vi_enc(len(plaintext))

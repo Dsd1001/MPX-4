@@ -44,6 +44,8 @@ jobs:
         run: python -m interop.endpoint_sensitivity --out-dir "$RUNNER_TEMP/mpx4-endpoint-sensitivity"
       - name: Review v2 concurrency, output, and progress regressions
         run: python -m interop.review_v2 --out-dir "$RUNNER_TEMP/mpx4-review-v2"
+      - name: Update-review post-commit, STOP, and retirement regressions
+        run: python -m interop.review_update --out-dir "$RUNNER_TEMP/mpx4-review-update"
       - name: Reference Gate 3 model-zero Mandatory profile
         run: python -m reference.gate3_harness --out-dir "$RUNNER_TEMP/mpx4-gate3"
       - name: Independent implementation canonical self-test
