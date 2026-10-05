@@ -121,9 +121,9 @@ Draft 11 state validation is normative in [STATE-MACHINES.md](STATE-MACHINES.md)
 
 AEAD authenticates Frame bytes in transit, but the protocol also defines semantic duplicate handling.
 
-When data overlaps byte positions already accepted on a Stream, the overlapping octets MUST be identical.
+While byte-comparison evidence remains eligible under the Core state rules, data that overlaps byte positions already accepted on a Stream MUST contain identical overlapping octets. This includes active and active-terminal Stream state before valid TOMBSTONE entry. After valid TOMBSTONE entry, DATA wholly within the recorded peer Final Offset is stale and exact application-byte comparison evidence may be released; reliable Transmission-ID semantic consistency and any required confirmation replay remain independently enforced.
 
-Conflicting bytes at the same Stream offset are a Session-level protocol violation.
+Conflicting bytes at the same Stream offset while byte-comparison evidence remains eligible are a Session-level protocol violation.
 
 Final-size declarations are immutable once authenticated. Data beyond a known final size or a contradictory final size is invalid.
 

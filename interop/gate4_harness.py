@@ -208,6 +208,43 @@ def verify_profile(report: dict, label: str) -> dict:
     }
 
 
+def verify_profile_endpoint_sources(
+    report: dict,
+    label: str,
+    implementation: str,
+    endpoint_wire_report: dict,
+    endpoint_mandatory_report: dict,
+) -> dict:
+    source_rows = []
+    for suite_name, source in (
+        ("endpoint-wire", endpoint_wire_report),
+        ("endpoint-mandatory", endpoint_mandatory_report),
+    ):
+        for row in source.get("cases") or []:
+            if row.get("implementation") == implementation and row.get("status") == "PASS":
+                source_rows.append((suite_name, row))
+    source_names = {row.get("case") for _, row in source_rows}
+    reported_count = int(report.get("endpoint_wire_execution_count") or 0)
+    check(
+        reported_count == len(source_rows),
+        f"{label} endpoint execution count is not bound to source reports: reported={reported_count} actual={len(source_rows)}",
+    )
+    endpoint_cases = [c for c in report.get("cases") or [] if c.get("evidence_class") == "endpoint-wire"]
+    referenced_names = set()
+    for case in endpoint_cases:
+        names = case.get("endpoint_wire_cases")
+        check(isinstance(names, list) and names, f"{label} {case.get('id')} missing endpoint-wire source names")
+        check(len(names) == len(set(names)), f"{label} {case.get('id')} duplicate endpoint-wire source name")
+        for name in names:
+            check(name in source_names, f"{label} {case.get('id')} references missing/non-PASS endpoint probe {name}")
+            referenced_names.add(name)
+    return {
+        "status": "PASS",
+        "source_execution_count": len(source_rows),
+        "referenced_probe_count": len(referenced_names),
+    }
+
+
 def run_cross_basic(out: Path, client: str, server: str, chunk: int) -> dict:
     d = out / f"basic-{client}-client__{server}-server-chunk{chunk}"
     cmd = [
@@ -276,8 +313,10 @@ def execute(out_dir: Path) -> dict:
     b_dir = out_dir / "independent-mandatory-profile"
     run([sys.executable, "-m", "reference.gate3_harness", "--out-dir", str(ref_dir)])
     run([sys.executable, "-m", "independent.profile", "--out-dir", str(b_dir)])
-    ref_profile = verify_profile(read(ref_dir / "gate3-report.json"), "reference")
-    b_profile = verify_profile(read(b_dir / "mandatory-profile-report.json"), "independent")
+    ref_profile_report = read(ref_dir / "gate3-report.json")
+    b_profile_report = read(b_dir / "mandatory-profile-report.json")
+    ref_profile = verify_profile(ref_profile_report, "reference")
+    b_profile = verify_profile(b_profile_report, "independent")
     check(
         ref_profile["evidence_counts"] == b_profile["evidence_counts"],
         "A/B profile evidence classification differs",
@@ -291,6 +330,7 @@ def execute(out_dir: Path) -> dict:
     review_followup_dir = out_dir / "review-followup"
     review_b66_dir = out_dir / "review-b66"
     review_stable_dir = out_dir / "review-stable"
+    review_freeze_dir = out_dir / "review-freeze"
     run([
         sys.executable,
         "-m",
@@ -312,6 +352,12 @@ def execute(out_dir: Path) -> dict:
     check(endpoint_mandatory.get("status") == "PASS", "formerly-model-only endpoint suite failed")
     check(endpoint_mandatory.get("execution_count") == 86, "expected 86 A/B formerly-model-only endpoint executions")
     check(len(endpoint_mandatory.get("covered_mandatory_ids") or []) == 42, "formerly-model-only suite ID coverage")
+    ref_profile_sources = verify_profile_endpoint_sources(
+        ref_profile_report, "reference", "reference", endpoint_wire, endpoint_mandatory
+    )
+    b_profile_sources = verify_profile_endpoint_sources(
+        b_profile_report, "independent", "independent", endpoint_wire, endpoint_mandatory
+    )
     run([
         sys.executable,
         "-m",
@@ -324,7 +370,7 @@ def execute(out_dir: Path) -> dict:
     check(sensitivity.get("baseline_status") == "PASS", "endpoint sensitivity baseline controls failed")
     check(sensitivity.get("baseline_control_count") == 52, "expected 52 unmutated sensitivity baselines")
     check(sensitivity.get("negative_control_status") == "PASS", "endpoint sensitivity oracle negative controls failed")
-    check(sensitivity.get("negative_control_count") == 4, "expected four sensitivity oracle negative controls")
+    check(sensitivity.get("negative_control_count") == 8, "expected eight sensitivity oracle negative controls")
     check(sensitivity.get("control_count") == 36, "expected thirty-six deliberate-defect sensitivity controls")
 
     run([
@@ -384,8 +430,20 @@ def execute(out_dir: Path) -> dict:
     ])
     review_stable = read(review_stable_dir / "review-stable-report.json")
     check(review_stable.get("status") == "PASS", "stable-audit closure regression failed")
-    check(review_stable.get("case_count") == 6, "expected six stable-audit case classes")
-    check(review_stable.get("execution_count") == 10, "expected ten stable-audit executions")
+    check(review_stable.get("case_count") == 10, "expected ten stable-audit case classes")
+    check(review_stable.get("execution_count") == 18, "expected eighteen stable-audit executions")
+
+    run([
+        sys.executable,
+        "-m",
+        "interop.review_freeze",
+        "--out-dir",
+        str(review_freeze_dir),
+    ])
+    review_freeze = read(review_freeze_dir / "review-freeze-report.json")
+    check(review_freeze.get("status") == "PASS", "freeze-followup Carrier output-scope regression failed")
+    check(review_freeze.get("case_count") == 10, "expected ten freeze-followup process cases")
+    check(review_freeze.get("execution_count") == 10, "expected ten freeze-followup executions")
 
     basic = []
     faults = []
@@ -411,8 +469,8 @@ def execute(out_dir: Path) -> dict:
         "status": "PASS",
         "git": {"head_sha": head, "dirty": dirty},
         "duration_seconds": round(time.time() - started, 3),
-        "implementation_a": ref_profile,
-        "implementation_b": b_profile,
+        "implementation_a": {**ref_profile, "endpoint_source_binding": ref_profile_sources},
+        "implementation_b": {**b_profile, "endpoint_source_binding": b_profile_sources},
         "implementation_b_dependency_audit": audit,
         "authenticated_endpoint_wire": {
             "status": endpoint_wire["status"],
@@ -454,6 +512,11 @@ def execute(out_dir: Path) -> dict:
             "case_count": review_stable["case_count"],
             "execution_count": review_stable["execution_count"],
         },
+        "review_freeze_regression": {
+            "status": review_freeze["status"],
+            "case_count": review_freeze["case_count"],
+            "execution_count": review_freeze["execution_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
@@ -472,11 +535,12 @@ def execute(out_dir: Path) -> dict:
         "claim": (
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
             "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, thirty-six target-witnessed "
-            "sensitivity mutations after 52 unmutated baselines and four oracle negative controls, twenty A/B executions covering ten "
+            "sensitivity mutations after 52 unmutated baselines and eight oracle negative controls, twenty A/B executions covering ten "
             "review-v2 regressions, eighteen A/B executions covering nine update-review classes, twenty-two A/B executions "
             "covering the independent follow-up lifecycle/output/API counterexamples and controls, twenty b66 review executions "
-            "covering pending-response progress plus DATA namespace/lower-bound controls, and ten stable-audit closure executions "
-            "covering optional handshake parameters, post-commit DATA cancellation handoff, Generation-oracle inputs, and Gate 4 profile validation all pass; "
+            "covering pending-response progress plus DATA namespace/lower-bound controls, eighteen stable-audit closure executions "
+            "covering optional handshake parameters, cancellation ownership/coalescing, retirement-task cleanup, Generation-oracle inputs, and Gate 4 profile/source validation, "
+            "plus ten process-level freeze-followup executions covering pre-auth plus post-auth CREATE/JOIN/replacement Carrier output-failure scope all pass; "
             "A/B real-TCP role reversal passes the basic and five fault profiles "
             "in direct and fragmented modes."
         ),

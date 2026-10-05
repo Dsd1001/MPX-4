@@ -270,6 +270,7 @@ class Gate2Session:
         self.pending_response_txids: Set[int] = set()
         self.pending_credit_stream_ids: Set[int] = set()
         self.pending_work_tasks: Set[asyncio.Task[None]] = set()
+        self.pending_response_flush_task: Optional[asyncio.Task[None]] = None
         self.settled_through = 0
         self.last_retire_advertised = 0
         self.retire_task: Optional[asyncio.Task[None]] = None
@@ -737,11 +738,18 @@ class Gate2Session:
             )
 
     def start_pending_response_flush(self, preferred: Optional[int] = None) -> asyncio.Task[None]:
+        current = self.pending_response_flush_task
+        if current is not None and not current.done():
+            return current
+
         task = asyncio.create_task(self.flush_pending_response_tx(preferred=preferred))
+        self.pending_response_flush_task = task
         self.pending_work_tasks.add(task)
 
         def done(completed: asyncio.Task[None]) -> None:
             self.pending_work_tasks.discard(completed)
+            if self.pending_response_flush_task is completed:
+                self.pending_response_flush_task = None
             if completed.cancelled():
                 return
             try:
@@ -2283,6 +2291,10 @@ class Gate2Session:
 
     async def cleanup(self) -> None:
         tasks = list(self.carrier_tasks.values()) + list(self.pending_work_tasks)
+        if self.retire_task is not None:
+            tasks.append(self.retire_task)
+        # De-duplicate Session-owned tasks before cancellation/gather.
+        tasks = list(dict.fromkeys(tasks))
         self.pending_work_tasks.clear()
         for task in tasks:
             if not task.done():
@@ -2294,8 +2306,12 @@ class Gate2Session:
                     task.exception()
                 except (Exception, asyncio.CancelledError):
                     pass
-            for task in pending:
-                task.cancel()
+            if pending:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+        self.pending_response_flush_task = None
+        self.retire_task = None
         carriers = list(self.carriers.values())
         self.carriers.clear()
         self.active_logical_ids.clear()
@@ -2745,6 +2761,19 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
                 error_type=type(exc).__name__,
                 error=str(exc),
                 session_preserved=session.session_id is not None,
+            )
+            await close_candidate_writer(writer)
+        except CarrierOutputError as exc:
+            # This error can only be raised by Session.send_frame() for an
+            # authenticated Carrier object. send_frame() has already marked
+            # that actor unusable and removed its current incarnation. Keep the
+            # failure Carrier-scoped instead of converting it to Session fatal.
+            session.trace.emit(
+                "authenticated_carrier_output_failed",
+                **exc.carrier.base_trace(),
+                error_type=type(exc.cause).__name__,
+                error=str(exc.cause),
+                session_preserved=session.state not in {"CLOSING", "CLOSED"},
             )
             await close_candidate_writer(writer)
         except Exception as exc:

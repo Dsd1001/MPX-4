@@ -18,9 +18,38 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
-from .endpoint_wire import run_one
+from .endpoint_wire import ProbeError, run_one
 
 IMPLEMENTATIONS = ("reference", "independent")
+
+EXPECTED_GUARD_FAILURE_TYPES: Dict[Tuple[str, str], Tuple[str, ...]] = {
+    ("server", "final-below-commitment"): ("TimeoutError",),
+    ("server", "crossed-session-credit"): ("TimeoutError",),
+    ("server", "fin-data-beyond-final"): ("TimeoutError",),
+    ("server", "reset-late-data-suppressed"): ("ProbeError",),
+    ("server", "stop-sending-directionality"): ("ProbeError",),
+    ("server", "legal-overlap-reassembly"): ("ProbeError",),
+    ("server", "terminal-credit-beyond-final"): ("TimeoutError",),
+    ("client", "tombstone-credit-beyond-final"): ("ProbeError",),
+    ("client", "tombstone-credit-invalid-pair"): ("ProbeError",),
+    ("client", "tombstone-credit-window-exceeded"): ("ProbeError",),
+    ("server", "tombstone-credit-beyond-final"): ("ProbeError",),
+    ("server", "tombstone-credit-invalid-pair"): ("ProbeError",),
+    ("server", "tombstone-credit-window-exceeded"): ("ProbeError",),
+    ("server", "padding-ignored"): ("IncompleteReadError", "ConnectionResetError"),
+    ("server", "capacity-reject-replay"): ("TimeoutError",),
+    ("server", "accepted-open-replay-tombstone"): ("ProbeError",),
+    ("client", "accepted-open-ok-replay-tombstone"): ("IncompleteReadError", "ConnectionResetError"),
+    ("server", "unknown-core-session-scope"): ("TimeoutError",),
+    ("client", "unknown-core-session-scope"): ("TimeoutError",),
+    ("server", "invalid-preopen-stop-id"): ("TimeoutError",),
+    ("client", "conflicting-open-reject"): ("TimeoutError",),
+    ("server", "late-stop-tombstone"): ("ProbeError",),
+    ("server", "retired-fin-confirmation-replay"): ("IncompleteReadError", "ConnectionResetError"),
+    ("server", "cross-carrier-reject-atomicity"): ("ProbeError",),
+    ("server", "retired-delayed-fin-recovery"): ("IncompleteReadError", "ConnectionResetError"),
+    ("client", "retired-delayed-fin-recovery"): ("IncompleteReadError", "ConnectionResetError"),
+}
 
 
 class SensitivityError(RuntimeError):
@@ -102,10 +131,26 @@ async def expect_case_failure(
                 f"{implementation}/{case_name} failed before target mutation branch {witness.label} was reached: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
-        if isinstance(exc, OSError) and not isinstance(exc, TimeoutError):
+        # A failure only counts as mutation detection when it came through the
+        # real endpoint guard and its exception class matches that guard's
+        # expected failure mode. Injected/external runners are negative-control
+        # infrastructure by definition, even if they raise TimeoutError or a
+        # superficially similar exception after the witness was hit.
+        if runner is not None:
             raise SensitivityError(
                 f"{implementation}/{case_name} hit target mutation branch {witness.label} but then failed with "
                 f"infrastructure error: {type(exc).__name__}: {exc}"
+            ) from exc
+        expected_types = EXPECTED_GUARD_FAILURE_TYPES.get((role, case_name))
+        if expected_types is None:
+            raise SensitivityError(
+                f"{implementation}/{case_name} has no causal failure policy for mutation {witness.label}"
+            ) from exc
+        observed_type = type(exc).__name__
+        if observed_type not in expected_types:
+            raise SensitivityError(
+                f"{implementation}/{case_name} hit target mutation branch {witness.label} but failed with "
+                f"unexpected {observed_type}; expected one of {expected_types}: {exc}"
             ) from exc
         return {
             "failure_type": type(exc).__name__,
@@ -166,33 +211,44 @@ async def run_oracle_negative_controls() -> List[dict]:
         else:
             raise SensitivityError("unrelated setup failure was incorrectly accepted as mutation detection")
 
-        post_witness = MutationWitness("negative-control-post-target-infrastructure")
-        async def unrelated_post_target_failure(*args, **kwargs):
-            post_witness.mark()
-            raise OSError("NEGATIVE CONTROL: unrelated infrastructure failure after target witness")
-        try:
-            await expect_case_failure(
-                implementation,
-                "retired-fin-confirmation-replay",
-                role="server",
-                witness=post_witness,
-                runner=unrelated_post_target_failure,
-            )
-        except SensitivityError as exc:
-            message = str(exc)
-            if "infrastructure error" not in message:
-                raise
-            results.append(
-                {
-                    "implementation": implementation,
-                    "status": "PASS",
-                    "handler_reached": True,
-                    "classification": "ERROR/INCONCLUSIVE",
-                    "reason": message,
-                }
-            )
-        else:
-            raise SensitivityError("post-target infrastructure failure was incorrectly accepted as mutation detection")
+        post_target_errors = (
+            ("OSError", OSError("NEGATIVE CONTROL: unrelated transport failure after target witness")),
+            ("TimeoutError", TimeoutError("NEGATIVE CONTROL: unrelated storage timeout after target witness")),
+            ("JSONDecodeError", json.JSONDecodeError("NEGATIVE CONTROL: corrupt infrastructure report", "x", 0)),
+        )
+        for error_name, injected_error in post_target_errors:
+            post_witness = MutationWitness(f"negative-control-post-target-{error_name}")
+
+            async def unrelated_post_target_failure(*args, _error=injected_error, **kwargs):
+                post_witness.mark()
+                raise _error
+
+            try:
+                await expect_case_failure(
+                    implementation,
+                    "retired-fin-confirmation-replay",
+                    role="server",
+                    witness=post_witness,
+                    runner=unrelated_post_target_failure,
+                )
+            except SensitivityError as exc:
+                message = str(exc)
+                if "infrastructure error" not in message:
+                    raise
+                results.append(
+                    {
+                        "implementation": implementation,
+                        "status": "PASS",
+                        "handler_reached": True,
+                        "error_type": error_name,
+                        "classification": "ERROR/INCONCLUSIVE",
+                        "reason": message,
+                    }
+                )
+            else:
+                raise SensitivityError(
+                    f"post-target {error_name} infrastructure failure was incorrectly accepted as mutation detection"
+                )
     return results
 
 
@@ -923,7 +979,7 @@ async def amain() -> dict:
         "claim": (
             "Unmutated guard scenarios pass first; every listed real-runtime mutation must "
             "reach its target branch before the guarded endpoint-wire case fails; unrelated "
-            "infrastructure failures are classified ERROR/INCONCLUSIVE both before and after target witness rather than mutation detection."
+            "failure attribution is bound to guard identity plus expected exception class, and unrelated infrastructure failures are classified ERROR/INCONCLUSIVE both before and after target witness rather than mutation detection."
         ),
     }
 

@@ -242,7 +242,13 @@ def validate_carrier_generation(root,check):
             h=_i(c['highest_accepted_generation']); g=_i(c['candidate_generation'])
             _expect(check,c,'reject_candidate' if g<=h else 'replace'); check(c['error']=='CARRIER_CONFLICT',c)
         elif n=='higher-generation-commit':
-            h=_i(c['highest_accepted_generation']); g=_i(c['candidate_generation']); _expect(check,c,'replace' if g>h and c['candidate_result']=='established' else 'reject_candidate'); check(_i(c['highest_accepted_generation_after'])==g,c)
+            h=_i(c['highest_accepted_generation']); g=_i(c['candidate_generation']); result=c['candidate_result']
+            actual='replace' if g>h and result=='established' else 'reject_candidate'
+            _expect(check,c,actual)
+            expected_after=g if actual=='replace' else h
+            check(_i(c['highest_accepted_generation_after'])==expected_after,c)
+            expected_previous_state='SUPERSEDED' if actual=='replace' else 'ESTABLISHED'
+            check(c.get('previous_generation_state')==expected_previous_state,c)
         elif n=='superseded-carrier-not-schedulable': _expect(check,c,'forbidden' if c['carrier_state']=='SUPERSEDED' else 'allowed')
         elif n=='superseded-record-after-commit': _expect(check,c,'ignore_as_new_protocol_state')
         elif n=='processed-old-record-before-commit-remains-applied': _expect(check,c,'retain_applied_effect')
