@@ -442,8 +442,8 @@ def execute(out_dir: Path) -> dict:
     ])
     review_freeze = read(review_freeze_dir / "review-freeze-report.json")
     check(review_freeze.get("status") == "PASS", "freeze-followup Carrier output-scope regression failed")
-    check(review_freeze.get("case_count") == 10, "expected ten freeze-followup process cases")
-    check(review_freeze.get("execution_count") == 10, "expected ten freeze-followup executions")
+    check(review_freeze.get("case_count") == 22, "expected eighteen freeze-followup process cases plus four ownership cases")
+    check(review_freeze.get("execution_count") == 22, "expected twenty-two freeze-followup executions")
 
     basic = []
     faults = []
@@ -540,7 +540,8 @@ def execute(out_dir: Path) -> dict:
             "covering the independent follow-up lifecycle/output/API counterexamples and controls, twenty b66 review executions "
             "covering pending-response progress plus DATA namespace/lower-bound controls, eighteen stable-audit closure executions "
             "covering optional handshake parameters, cancellation ownership/coalescing, retirement-task cleanup, Generation-oracle inputs, and Gate 4 profile/source validation, "
-            "plus ten process-level freeze-followup executions covering pre-auth plus post-auth CREATE/JOIN/replacement Carrier output-failure scope all pass; "
+            "plus eighteen process-level freeze-followup executions covering pre-auth plus post-auth CREATE/JOIN/replacement/rejoin output-failure scope and autonomous credit, "
+            "and four A/B Client/Server encrypted-Record credit ownership/cancellation/cleanup executions all pass; "
             "A/B real-TCP role reversal passes the basic and five fault profiles "
             "in direct and fragmented modes."
         ),
