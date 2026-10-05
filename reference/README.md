@@ -49,7 +49,9 @@ Gate 3 executes **121 individually identified Mandatory cases** covering A1–A5
 
 `interop/review_update.py` preserves that suite and adds **9 case classes / 18 total A/B executions** for the remaining update-review gaps: two post-Finished installation races, STOP default-RESET persistence after ACK output failure, exact retirement-prefix snapshot accounting, and failover from a MAX_KEY_RECORDS-exhausted Carrier, with four paired normal controls.
 
-Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both model-zero 121-case profiles, **286 authenticated endpoint executions** (200 baseline + 86 formerly-model-only), thirty-six target-witnessed sensitivity mutations, 52 unmutated sensitivity baselines, two oracle negative controls, **20 review-v2 A/B executions**, **18 update-review A/B executions**, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes. J5 exercises the actual CLI Server process: an invalid candidate Finished must close only that candidate while the established Carrier and listener remain usable.
+`interop/review_followup.py` adds **11 case classes / 22 total A/B executions** from the independent 77ed0e1 replay: terminal Client late-JOIN installation, pre-open STOP response persistence, cross-Carrier response-output fault attribution and recovery, immutable DATA payload ownership, and fail-atomic oversized DATA rejection, paired with five normal controls.
+
+Gate 4 runs this reference implementation against `independent/`, a separate runtime source tree with its own VarInt, handshake, HKDF/Finished, AES-GCM Record, Frame codec, endpoint, and state implementation. The aggregate requires both model-zero 121-case profiles, **286 authenticated endpoint executions** (200 baseline + 86 formerly-model-only), thirty-six target-witnessed sensitivity mutations, 52 unmutated sensitivity baselines, two oracle negative controls, **20 review-v2 A/B executions**, **18 update-review A/B executions**, **22 independent follow-up A/B executions**, A→B/B→A basic full-duplex tests, and all five deterministic fault scenarios in direct and fragmented modes. J5 exercises the actual CLI Server process: an invalid candidate Finished must close only that candidate while the established Carrier and listener remain usable.
 
 The Gate 4 independence claim is deliberately scoped to **runtime source/module isolation**: `independent/` imports no `reference/`, `tools/`, or validator runtime code. Both implementations live in this repository and were produced within the same project, so the evidence does not claim third-party or organizationally independent development. No Mandatory case is model-only, but 18 codec and 30 cross-wire cases remain deliberately classified by their correct executable surface rather than being mislabeled endpoint-wire. Passing these gates also does not itself declare Protocol Version 4 stable.
 
@@ -104,6 +106,7 @@ Run authenticated endpoint conformance and sensitivity controls:
     python -m interop.endpoint_sensitivity --out-dir /tmp/mpx4-endpoint-sensitivity
     python -m interop.review_v2 --out-dir /tmp/mpx4-review-v2
     python -m interop.review_update --out-dir /tmp/mpx4-review-update
+    python -m interop.review_followup --out-dir /tmp/mpx4-review-followup
 
 Run the model-zero 121-case Mandatory profile:
 

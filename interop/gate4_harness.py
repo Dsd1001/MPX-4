@@ -247,6 +247,7 @@ def execute(out_dir: Path) -> dict:
     sensitivity_dir = out_dir / "endpoint-sensitivity"
     review_v2_dir = out_dir / "review-v2"
     review_update_dir = out_dir / "review-update"
+    review_followup_dir = out_dir / "review-followup"
     run([
         sys.executable,
         "-m",
@@ -307,6 +308,18 @@ def execute(out_dir: Path) -> dict:
     check(review_update.get("case_count") == 9, "expected nine update-review case classes")
     check(review_update.get("execution_count") == 18, "expected eighteen A/B update-review executions")
 
+    run([
+        sys.executable,
+        "-m",
+        "interop.review_followup",
+        "--out-dir",
+        str(review_followup_dir),
+    ])
+    review_followup = read(review_followup_dir / "review-followup-report.json")
+    check(review_followup.get("status") == "PASS", "independent follow-up review regression failed")
+    check(review_followup.get("case_count") == 11, "expected eleven follow-up review case classes")
+    check(review_followup.get("execution_count") == 22, "expected twenty-two A/B follow-up review executions")
+
     basic = []
     faults = []
     for chunk in (0, 257):
@@ -359,6 +372,11 @@ def execute(out_dir: Path) -> dict:
             "case_count": review_update["case_count"],
             "execution_count": review_update["execution_count"],
         },
+        "review_followup_regression": {
+            "status": review_followup["status"],
+            "case_count": review_followup["case_count"],
+            "execution_count": review_followup["execution_count"],
+        },
         "cross_basic_role_reversal": basic,
         "cross_fault_role_reversal": faults,
         "cross_basic_run_count": len(basic),
@@ -378,7 +396,8 @@ def execute(out_dir: Path) -> dict:
             "Gate 4 aggregate PASS: both source-isolated runtimes pass all 121 A-L Mandatory case IDs with no model-only evidence; "
             "200 baseline authenticated endpoint-wire executions, 86 formerly-model-only endpoint executions, thirty-six target-witnessed "
             "sensitivity mutations after 52 unmutated baselines and two oracle negative controls, twenty A/B executions covering ten "
-            "review-v2 regressions, and eighteen A/B executions covering nine update-review counterexample/control classes all pass; "
+            "review-v2 regressions, eighteen A/B executions covering nine update-review classes, and twenty-two A/B executions "
+            "covering the independent follow-up lifecycle/output/API counterexamples and controls all pass; "
             "A/B real-TCP role reversal passes the basic and five fault profiles "
             "in direct and fragmented modes."
         ),
@@ -410,6 +429,7 @@ def main() -> int:
             f"sensitivity={report['endpoint_coverage_sensitivity']['control_count']}, "
             f"review-v2={report['review_v2_regression']['execution_count']}, "
             f"review-update={report['review_update_regression']['execution_count']}, "
+            f"review-followup={report['review_followup_regression']['execution_count']}, "
             f"{report['cross_basic_run_count']} cross-basic, "
             f"{report['cross_fault_scenario_execution_count']} cross-fault executions)"
         )

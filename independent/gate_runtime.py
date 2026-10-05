@@ -67,9 +67,11 @@ from .core import (
     TransmissionError,
     VERSION,
     derive_traffic,
+    encode_frame,
     encode_client_init,
     encode_message,
     encode_server_init,
+    frame_body,
     parse_client_init,
     parse_server_init,
     read_message,
@@ -135,6 +137,13 @@ class HandshakeRejected(RuntimeError):
 
 class StreamStateError(ProtocolError):
     pass
+
+
+class CarrierOutputError(RuntimeError):
+    def __init__(self, carrier: Carrier, cause: BaseException) -> None:
+        super().__init__(f"Carrier {carrier.carrier_id}/{carrier.generation} output failed: {cause}")
+        self.carrier = carrier
+        self.cause = cause
 
 
 @dataclass
@@ -461,6 +470,19 @@ class IndependentSession:
             self.set_state("DORMANT", reason=reason)
 
     async def add_carrier(self, carrier: Carrier, accepted_locally: bool = True) -> bool:
+        if accepted_locally and self.state in {"CLOSING", "CLOSED"}:
+            carrier.output_usable = False
+            self.trace.emit(
+                "local_carrier_install_discarded",
+                **carrier.base_trace(),
+                state=self.state,
+                reason="terminal-session",
+            )
+            try:
+                carrier.writer.close()
+            except Exception:
+                pass
+            return False
         if self.session_id is None:
             self.session_id = carrier.session_id
         if accepted_locally:
@@ -607,9 +629,13 @@ class IndependentSession:
         self.require_writable_incarnation(carrier)
         try:
             await carrier.send_frame(frame_type, **fields)
-        except BaseException:
-            if not carrier.output_usable and self.is_current_incarnation(carrier):
-                asyncio.create_task(self.on_carrier_lost(carrier, "ordered-output-failure"))
+        except BaseException as exc:
+            if not carrier.output_usable:
+                if self.is_current_incarnation(carrier):
+                    await self.on_carrier_lost(carrier, "ordered-output-failure")
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                raise CarrierOutputError(carrier, exc) from exc
             raise
         info = carrier.base_trace()
         info["frame_type"] = FRAME_NAMES.get(frame_type, f"0x{frame_type:x}")
@@ -844,22 +870,40 @@ class IndependentSession:
         stream_id: int,
         txid: int,
         original_frame_type: int,
+        original_fields: Optional[Dict[str, object]] = None,
     ) -> None:
         self.remember_ack(stream_id, txid)
+        suppression_fields = (
+            original_fields
+            if original_fields is not None
+            else {"stream_id": stream_id, "transmission_id": txid}
+        )
         if self.should_suppress_confirmation(
             original_frame_type,
-            {"stream_id": stream_id, "transmission_id": txid},
+            suppression_fields,
             incoming,
         ):
             return
         reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-        await self.send_frame(
-            reply,
-            FRAME_TRANSMISSION_ACK,
-            stream_id=stream_id,
-            transmission_id=txid,
-            receiver_timestamp_us=reply.timestamp_us(),
-        )
+        try:
+            await self.send_frame(
+                reply,
+                FRAME_TRANSMISSION_ACK,
+                stream_id=stream_id,
+                transmission_id=txid,
+                receiver_timestamp_us=reply.timestamp_us(),
+            )
+        except CarrierOutputError:
+            if self.state in {"CLOSING", "CLOSED"}:
+                return
+            retry = self.choose_carrier()
+            await self.send_frame(
+                retry,
+                FRAME_TRANSMISSION_ACK,
+                stream_id=stream_id,
+                transmission_id=txid,
+                receiver_timestamp_us=retry.timestamp_us(),
+            )
 
     async def receive_loop(self, carrier: Carrier) -> None:
         try:
@@ -897,6 +941,22 @@ class IndependentSession:
                         return
                     try:
                         await self.handle_frame(carrier, frame_type, fields)
+                    except CarrierOutputError as output_exc:
+                        # A valid input Frame can trigger a response on another
+                        # Carrier. A failure of that output actor must not be
+                        # reclassified as a defect in the input Carrier.
+                        if output_exc.carrier is carrier or not self.is_current_incarnation(carrier):
+                            return
+                        saved_txid = int(fields.get("transmission_id", 0))
+                        if saved_txid > 0 and saved_txid in self.peer_tx_confirmation:
+                            try:
+                                await self.resend_confirmation(carrier, saved_txid)
+                            except CarrierOutputError:
+                                self.trace.emit(
+                                    "confirmation_retry_deferred",
+                                    **carrier.base_trace(),
+                                    transmission_id=saved_txid,
+                                )
                     except Exception as exc:
                         handled = await self._handle_decoded_frame_failure(carrier, frame_type, exc)
                         if not handled:
@@ -1600,7 +1660,13 @@ class IndependentSession:
                 duplicate = self.register_peer_tx(FRAME_STREAM_DATA, fields)
                 if not duplicate:
                     self.application_duplicate_bytes_suppressed += len(data)
-                await self.acknowledge(incoming, stream_id, txid, FRAME_STREAM_DATA)
+                await self.acknowledge(
+            incoming,
+            stream_id,
+            txid,
+            FRAME_STREAM_DATA,
+            original_fields=fields,
+        )
                 return
             if stream_id in self.retired_stream_ids:
                 if await self.handle_retired_replay(incoming, FRAME_STREAM_DATA, fields):
@@ -1642,16 +1708,12 @@ class IndependentSession:
             else:
                 self.flush_contiguous_chunks(stream)
 
-        self.remember_ack(stream_id, txid)
-        if self.should_suppress_confirmation(FRAME_STREAM_DATA, fields, incoming):
-            return
-        reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-        await self.send_frame(
-            reply,
-            FRAME_TRANSMISSION_ACK,
-            stream_id=stream_id,
-            transmission_id=txid,
-            receiver_timestamp_us=reply.timestamp_us(),
+        await self.acknowledge(
+            incoming,
+            stream_id,
+            txid,
+            FRAME_STREAM_DATA,
+            original_fields=fields,
         )
 
     def apply_terminal_receive(
@@ -1808,8 +1870,15 @@ class IndependentSession:
                 await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
                 return
             if stream_id in self.opening_tombstones:
+                opening = self.opening_tombstones[stream_id]
                 self.register_peer_tx(FRAME_STOP_SENDING, fields)
                 await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+                reset_txid = opening.get("reset_txid")
+                if opening.get("decision") == "preopen-stop" and isinstance(reset_txid, int):
+                    reset_tx = self.local_tx.get(reset_txid)
+                    if reset_tx is not None and not reset_tx.settled:
+                        reply = self.choose_carrier()
+                        await self.send_tx(reset_tx, reply, reinjection=reset_tx.attempts > 0)
                 return
             if stream_id in self.retired_stream_ids:
                 if await self.handle_retired_replay(incoming, FRAME_STOP_SENDING, fields):
@@ -1817,13 +1886,21 @@ class IndependentSession:
                 raise StreamStateError("STOP_SENDING retired without replay state")
             if self.role == "server":
                 duplicate = self.register_peer_tx(FRAME_STOP_SENDING, fields)
-                self.opening_tombstones[stream_id] = {"decision":"preopen-stop","terminal_txid":txid}
-                reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-                self.remember_ack(stream_id, txid)
-                await self.send_frame(reply, FRAME_TRANSMISSION_ACK, stream_id=stream_id, transmission_id=txid, receiver_timestamp_us=reply.timestamp_us())
-                if not duplicate:
-                    reset = self.alloc_tx(FRAME_RESET_STREAM, stream_id, final_offset=0, stream_error_code=int(fields["stream_error_code"]))
-                    await self.send_tx(reset, reply)
+                reset = self.alloc_tx(
+                    FRAME_RESET_STREAM,
+                    stream_id,
+                    final_offset=0,
+                    stream_error_code=int(fields["stream_error_code"]),
+                )
+                self.opening_tombstones[stream_id] = {
+                    "decision": "preopen-stop",
+                    "terminal_txid": txid,
+                    "reset_txid": reset.txid,
+                }
+                await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
+                if not reset.settled:
+                    reply = self.choose_carrier()
+                    await self.send_tx(reset, reply, reinjection=duplicate or reset.attempts > 0)
                 return
             raise StreamStateError("STOP_SENDING for unknown Stream")
         if stream.lifecycle == "OPENING" and not stream.accepted:
@@ -1849,16 +1926,10 @@ class IndependentSession:
             stream.local_terminal_txid = reset_tx.txid
             stream.stream_error_code = int(fields["stream_error_code"])
 
-        self.remember_ack(stream_id, txid)
-        await self.send_frame(
-            reply,
-            FRAME_TRANSMISSION_ACK,
-            stream_id=stream_id,
-            transmission_id=txid,
-            receiver_timestamp_us=reply.timestamp_us(),
-        )
+        await self.acknowledge(incoming, stream_id, txid, FRAME_STOP_SENDING)
         if reset_tx is not None and not reset_tx.settled:
-            await self.send_tx(reset_tx, reply, reinjection=duplicate or reset_tx.attempts > 0)
+            reset_reply = reply if self.is_current_incarnation(reply, writable=True) else self.choose_carrier()
+            await self.send_tx(reset_tx, reset_reply, reinjection=duplicate or reset_tx.attempts > 0)
             stream.reset_sent_event.set()
 
     async def open_stream(self, stream_id: int, carrier: Carrier) -> StreamState:
@@ -1922,10 +1993,23 @@ class IndependentSession:
         if stream.send_terminal_mode != "ACTIVE" or stream.send_final is not None:
             raise StreamStateError("new DATA is forbidden after terminal send state")
         self.require_writable_incarnation(carrier)
+        if type(data) is not bytes:
+            raise TypeError("STREAM_DATA requires immutable bytes")
+        if len(data) > self.peer_limits.max_frame_payload:
+            raise ProtocolError("STREAM_DATA exceeds peer MAX_FRAME_PAYLOAD")
         if stream.send_offset + len(data) > stream.peer_credit.maximum:
             raise FlowControlError("local sender lacks Stream credit")
         if self.session_send_committed + len(data) > self.session_peer_credit.maximum:
             raise FlowControlError("local sender lacks Session credit")
+        preview_body = frame_body(
+            FRAME_STREAM_DATA,
+            stream_id=stream.stream_id,
+            transmission_id=self.next_txid,
+            offset=stream.send_offset,
+            data=data,
+        )
+        if len(encode_frame(FRAME_STREAM_DATA, preview_body)) > self.peer_limits.max_record_size:
+            raise ProtocolError("STREAM_DATA Frame exceeds peer MAX_RECORD_SIZE")
         tx = self.alloc_tx(
             FRAME_STREAM_DATA,
             stream.stream_id,
@@ -2228,7 +2312,14 @@ async def client_handshake(
         **carrier.base_trace(),
         protocol_version=VERSION,
     )
-    await session.add_carrier(carrier)
+    installed = await session.add_carrier(carrier)
+    if not installed:
+        session.trace.emit(
+            "local_candidate_install_lost",
+            **carrier.base_trace(),
+            state=session.state,
+        )
+        raise RuntimeError("Session became terminal before local Carrier installation")
     return carrier
 
 
