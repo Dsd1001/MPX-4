@@ -705,8 +705,12 @@ class Carrier:
                     wrote = True
                 self.send_seq = seq + 1
                 await self.writer.drain()
-            except BaseException:
-                if wrote:
+            except BaseException as exc:
+                if wrote or isinstance(exc, OSError):
+                    # Limit transport-failure classification to writer I/O.
+                    # Pre-write OSError and every post-commit failure make this
+                    # Carrier incarnation output-terminal; unrelated I/O after
+                    # a successful send (such as trace persistence) does not.
                     self.output_usable = False
                     try:
                         self.writer.close()

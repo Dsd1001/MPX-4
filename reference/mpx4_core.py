@@ -775,11 +775,15 @@ class Carrier:
                 # number before the first cancellation point.
                 self.send_seq = seq + 1
                 await self.writer.drain()
-            except BaseException:
-                if committed:
-                    # After any post-commit failure/cancellation we cannot
-                    # prove whether all committed bytes reached the peer. The
-                    # Carrier therefore cannot safely emit another Record.
+            except BaseException as exc:
+                if committed or isinstance(exc, OSError):
+                    # A transport OSError from write()/drain() is Carrier-output
+                    # failure even if write() rejected before committing bytes.
+                    # Any post-commit failure/cancellation is likewise terminal
+                    # because delivery is ambiguous and the Record nonce cannot
+                    # be reused. Keep this scope inside the writer operation so
+                    # unrelated later I/O (for example trace persistence) is not
+                    # misclassified as transport failure.
                     self.output_usable = False
                     try:
                         self.writer.close()

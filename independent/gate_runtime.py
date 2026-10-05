@@ -286,6 +286,9 @@ class IndependentSession:
         self.pending_confirmation_txids: Set[int] = set()
         self.pending_response_txids: Set[int] = set()
         self.pending_credit_stream_ids: Set[int] = set()
+        self.credit_refresh_generation = 0
+        self.pending_credit_flush_task: Optional[asyncio.Task[None]] = None
+        self.pending_retire_refresh = False
         self.pending_work_tasks: Set[asyncio.Task[None]] = set()
         self.pending_response_flush_task: Optional[asyncio.Task[None]] = None
         self.settled_through = 0
@@ -326,6 +329,9 @@ class IndependentSession:
         if self.state == state:
             return
         self.state = state
+        if state in {"CLOSING", "CLOSED"}:
+            self.pending_credit_stream_ids.clear()
+            self.pending_retire_refresh = False
         self.state_history.append(state)
         self.trace.emit(
             "session_state",
@@ -553,27 +559,13 @@ class IndependentSession:
         return True
 
     async def refresh_after_establish(self, carrier: Carrier) -> None:
-        await self.send_frame(
-            carrier,
-            FRAME_SESSION_CREDIT,
-            consumed_bytes=0,
-            maximum_bytes=self.session_local_maximum,
-        )
-        self.session_credit_refreshes += 1
-        self.trace.emit(
-            "recovery_refresh",
-            **carrier.base_trace(),
-            kind="SESSION_CREDIT",
-            maximum=self.session_local_maximum,
-        )
+        self.queue_credit_refresh(0)
         if self.settled_through > 0:
-            await self.send_retire(carrier)
-            self.trace.emit(
-                "recovery_refresh",
-                **carrier.base_trace(),
-                kind="TRANSMISSION_RETIRE",
-                retired_through=self.settled_through,
-            )
+            self.pending_retire_refresh = True
+        task = self.start_pending_credit_flush(preferred=carrier.carrier_id, raise_on_failure=True)
+        await asyncio.shield(task)
+        if self.retire_task is not None:
+            await asyncio.shield(self.retire_task)
 
     async def _close_writer(self, carrier: Carrier) -> None:
         try:
@@ -704,9 +696,18 @@ class IndependentSession:
                 attempt=tx.attempts,
             )
 
-    async def flush_pending_credit_responses(self, preferred: Optional[int] = None) -> None:
+    def queue_credit_refresh(self, stream_id: int) -> None:
+        if self.state in {"CLOSING", "CLOSED"}:
+            return
+        self.pending_credit_stream_ids.add(stream_id)
+        self.credit_refresh_generation += 1
+
+    async def flush_pending_credit_responses(
+        self, preferred: Optional[int] = None, *, raise_on_failure: bool = False
+    ) -> None:
         while self.pending_credit_stream_ids and self.state == "ACTIVE":
             stream_id = min(self.pending_credit_stream_ids)
+            refresh_generation = self.credit_refresh_generation
             try:
                 carrier = self.choose_carrier(preferred=preferred)
             except RuntimeError:
@@ -732,15 +733,77 @@ class IndependentSession:
                 )
                 self.session_credit_refreshes += 1
             except CarrierOutputError:
+                if raise_on_failure:
+                    raise
                 preferred = None
                 continue
-            self.pending_credit_stream_ids.discard(stream_id)
+            if refresh_generation == self.credit_refresh_generation:
+                self.pending_credit_stream_ids.discard(stream_id)
             preferred = None
+            if stream_id == 0:
+                self.trace.emit(
+                    "recovery_refresh",
+                    **carrier.base_trace(),
+                    kind="SESSION_CREDIT",
+                    maximum=self.session_local_maximum,
+                )
             self.trace.emit(
                 "pending_credit_response_sent",
                 **carrier.base_trace(),
                 stream_id=stream_id,
             )
+
+    def start_pending_credit_flush(
+        self, preferred: Optional[int] = None, *, raise_on_failure: bool = False
+    ) -> asyncio.Task[None]:
+        current = self.pending_credit_flush_task
+        if current is not None and not current.done():
+            return current
+        task = asyncio.create_task(self.flush_pending_credit_work(
+            preferred=preferred, raise_on_failure=raise_on_failure
+        ))
+        self.pending_credit_flush_task = task
+        self.pending_work_tasks.add(task)
+
+        def done(completed: asyncio.Task[None]) -> None:
+            owned = completed in self.pending_work_tasks
+            self.pending_work_tasks.discard(completed)
+            if self.pending_credit_flush_task is completed:
+                self.pending_credit_flush_task = None
+            exc = None if completed.cancelled() else completed.exception()
+            if not owned:
+                return
+            if isinstance(exc, CarrierOutputError):
+                self.trace.emit(
+                    "authenticated_carrier_output_failed",
+                    **exc.carrier.base_trace(),
+                    error_type=type(exc.cause).__name__,
+                    error=str(exc.cause),
+                    session_preserved=self.state not in {"CLOSING", "CLOSED"},
+                )
+            elif exc is not None:
+                self.trace.emit("pending_work_error", error_type=type(exc).__name__, error=str(exc))
+            if completed.cancelled() or isinstance(exc, CarrierOutputError):
+                if self.pending_credit_stream_ids and self.state == "ACTIVE":
+                    self.start_pending_credit_flush()
+            self.queue_retire_refresh()
+
+        task.add_done_callback(done)
+        return task
+
+    async def flush_pending_credit_work(
+        self, preferred: Optional[int] = None, *, raise_on_failure: bool = False
+    ) -> None:
+        while True:
+            await self.flush_pending_credit_responses(preferred=preferred, raise_on_failure=raise_on_failure)
+            await self.flush_pending_confirmations()
+            await self.flush_pending_response_tx()
+            if not self.pending_credit_stream_ids or self.state != "ACTIVE":
+                return
+            try:
+                self.choose_carrier(preferred=preferred)
+            except RuntimeError:
+                return
 
     def start_pending_response_flush(self, preferred: Optional[int] = None) -> asyncio.Task[None]:
         current = self.pending_response_flush_task
@@ -776,7 +839,8 @@ class IndependentSession:
             return
         await self.flush_pending_confirmations()
         await self.flush_pending_response_tx()
-        await self.flush_pending_credit_responses()
+        if self.pending_credit_stream_ids:
+            await asyncio.shield(self.start_pending_credit_flush())
 
     async def send_frame(self, carrier: Carrier, frame_type: int, **fields: object) -> None:
         self.require_writable_incarnation(carrier)
@@ -898,7 +962,7 @@ class IndependentSession:
             self.queue_retire_refresh()
 
     def queue_retire_refresh(self) -> None:
-        if self.settled_through <= self.last_retire_advertised:
+        if not self.pending_retire_refresh and self.settled_through <= self.last_retire_advertised:
             return
         if self.state in {"CLOSING", "CLOSED"}:
             return
@@ -912,13 +976,26 @@ class IndependentSession:
 
     async def _flush_retire_refresh(self) -> None:
         try:
-            while self.state not in {"CLOSING", "CLOSED"} and self.last_retire_advertised < self.settled_through:
+            while self.state not in {"CLOSING", "CLOSED"} and (
+                self.pending_retire_refresh or self.last_retire_advertised < self.settled_through
+            ):
                 try:
                     carrier = self.choose_carrier()
                 except RuntimeError:
                     return
                 try:
+                    refresh_generation = self.credit_refresh_generation
+                    refresh_pending = self.pending_retire_refresh
                     await self.send_retire(carrier)
+                    if refresh_generation == self.credit_refresh_generation:
+                        self.pending_retire_refresh = False
+                    if refresh_pending:
+                        self.trace.emit(
+                            "recovery_refresh",
+                            **carrier.base_trace(),
+                            kind="TRANSMISSION_RETIRE",
+                            retired_through=self.last_retire_advertised,
+                        )
                 except ProtocolError:
                     if not carrier.output_usable:
                         continue
@@ -1578,8 +1655,8 @@ class IndependentSession:
         if frame_type == FRAME_CREDIT_PROBE:
             stream_id = int(fields["stream_id"])
             reply = self.alternate_carrier(incoming) if len(self.carriers) > 1 else incoming
-            self.pending_credit_stream_ids.add(stream_id)
-            await self.flush_pending_credit_responses(preferred=reply.carrier_id)
+            self.queue_credit_refresh(stream_id)
+            await asyncio.shield(self.start_pending_credit_flush(preferred=reply.carrier_id))
             return
 
         if frame_type == FRAME_PING:
@@ -2208,6 +2285,8 @@ class IndependentSession:
             await asyncio.wait_for(self.carrier_change_event.wait(), timeout=remain)
 
     async def cleanup(self) -> None:
+        self.pending_credit_stream_ids.clear()
+        self.pending_retire_refresh = False
         tasks = list(self.carrier_tasks.values()) + list(self.pending_work_tasks)
         if self.retire_task is not None:
             tasks.append(self.retire_task)
@@ -2229,6 +2308,7 @@ class IndependentSession:
                     task.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)
         self.pending_response_flush_task = None
+        self.pending_credit_flush_task = None
         self.retire_task = None
         carriers = list(self.carriers.values())
         self.carriers.clear()
@@ -2653,18 +2733,10 @@ async def server_main(session: IndependentSession, args: argparse.Namespace, key
                 session_preserved=session.session_id is not None,
             )
             await close_candidate_writer(writer)
-        except CarrierOutputError as exc:
-            # This error can only be raised by Session.send_frame() for an
-            # authenticated Carrier object. send_frame() has already marked
-            # that actor unusable and removed its current incarnation. Keep the
-            # failure Carrier-scoped instead of converting it to Session fatal.
-            session.trace.emit(
-                "authenticated_carrier_output_failed",
-                **exc.carrier.base_trace(),
-                error_type=type(exc.cause).__name__,
-                error=str(exc.cause),
-                session_preserved=session.state not in {"CLOSING", "CLOSED"},
-            )
+        except CarrierOutputError:
+            # The Session-owned credit worker records this authenticated output
+            # failure exactly once. The CLI worker only preserves error scope
+            # and closes the failed candidate socket.
             await close_candidate_writer(writer)
         except Exception as exc:
             session.fatal_error = f"{type(exc).__name__}: {exc}"
