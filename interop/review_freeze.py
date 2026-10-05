@@ -281,11 +281,8 @@ async def run_case(implementation: str, mode: str, out_dir: Path) -> dict:
                 for event in scoped_events
                 if event.get("event") == "authenticated_carrier_output_failed"
             ]
-            check(post_events, scoped_events)
-            check(
-                any(event.get("error_type") == "ConnectionResetError" for event in post_events),
-                post_events,
-            )
+            check(len(post_events) == 1, post_events)
+            check(post_events[0].get("error_type") == "ConnectionResetError", post_events)
         if mode.startswith("prewrite-"):
             failed_id = 2 if mode == "prewrite-join" else 1
             failed_generation = 1 if mode in {"prewrite-replacement", "prewrite-rejoin"} else 0
@@ -395,6 +392,36 @@ async def run_ownership_case(implementation: str, role: str, out_dir: Path) -> d
         await install(healthy)
         await healthy_peer.recv_until(core.FRAME_SESSION_CREDIT)
         await wait_until(lambda: not session.pending_work_tasks, label="initial credit completion")
+
+        # A local trace/storage OSError after an encrypted Record has already
+        # reached the peer is not a Carrier transport failure. Keep the actor
+        # current and writable while propagating the unrelated local error.
+        original_emit = fixture.trace.emit
+        trace_faulted = False
+
+        def trace_storage_fault(event, **fields):
+            nonlocal trace_faulted
+            if event == "record_send" and not trace_faulted:
+                trace_faulted = True
+                raise OSError("trace persistence failed after network commit")
+            return original_emit(event, **fields)
+
+        fixture.trace.emit = trace_storage_fault
+        try:
+            try:
+                await session.send_frame(healthy, core.FRAME_PING, token=0xB020)
+            except OSError as exc:
+                check("trace persistence failed" in str(exc), exc)
+            else:
+                raise RuntimeError("trace OSError negative control did not fire")
+        finally:
+            fixture.trace.emit = original_emit
+        trace_ping = await healthy_peer.recv_until(core.FRAME_PING)
+        check(trace_ping["token"] == 0xB020, trace_ping)
+        check(healthy.output_usable, "trace OSError incorrectly poisoned Carrier output")
+        check(session.choose_carrier(preferred=healthy.carrier_id) is healthy,
+              "trace OSError incorrectly removed current Carrier")
+
         for stage in ("flush_pending_confirmations", "flush_pending_response_tx"):
             stage_started = asyncio.Event()
             stage_release = asyncio.Event()
@@ -537,7 +564,8 @@ async def run_ownership_case(implementation: str, role: str, out_dir: Path) -> d
               "terminal cleanup leaked or emitted owned credit work")
         return {"implementation": implementation, "mode": f"ownership-{role}",
                 "encrypted_records": True, "tcp": False, "autonomous_credit": True, "ping": True,
-                "raw_oserror": True, "committed_record_retained": True, "all_path_loss_rejoin": True,
+                "raw_oserror": True, "trace_oserror_not_transport": True,
+                "committed_record_retained": True, "all_path_loss_rejoin": True,
                 "cancelled_callers": 3, "newer_snapshot_retained": True,
                 "credit_after_confirmation_await": True, "credit_after_response_await": True,
                 "cancelled_output_handoff": True, "retire_refresh": True, "terminal_cleanup": True}

@@ -842,12 +842,6 @@ class Gate2Session:
         try:
             await carrier.send_frame(frame_type, **fields)
         except BaseException as exc:
-            if isinstance(exc, OSError) and carrier.output_usable:
-                carrier.output_usable = False
-                try:
-                    carrier.writer.close()
-                except Exception:
-                    pass
             if not carrier.output_usable:
                 if self.carrier_is_current(carrier):
                     await self.on_carrier_lost(carrier, "ordered-output-failure")
@@ -2847,18 +2841,10 @@ async def server_main(session: Gate2Session, args: argparse.Namespace, key: byte
                 session_preserved=session.session_id is not None,
             )
             await close_candidate_writer(writer)
-        except CarrierOutputError as exc:
-            # This error can only be raised by Session.send_frame() for an
-            # authenticated Carrier object. send_frame() has already marked
-            # that actor unusable and removed its current incarnation. Keep the
-            # failure Carrier-scoped instead of converting it to Session fatal.
-            session.trace.emit(
-                "authenticated_carrier_output_failed",
-                **exc.carrier.base_trace(),
-                error_type=type(exc.cause).__name__,
-                error=str(exc.cause),
-                session_preserved=session.state not in {"CLOSING", "CLOSED"},
-            )
+        except CarrierOutputError:
+            # The Session-owned credit worker records this authenticated output
+            # failure exactly once. The CLI worker only preserves error scope
+            # and closes the failed candidate socket.
             await close_candidate_writer(writer)
         except Exception as exc:
             session.fatal_error = f"{type(exc).__name__}: {exc}"
