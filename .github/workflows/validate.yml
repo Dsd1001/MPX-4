@@ -58,6 +58,8 @@ jobs:
         run: python -m reference.gate3_harness --out-dir "$RUNNER_TEMP/mpx4-gate3"
       - name: Independent implementation canonical self-test
         run: python -m independent.selftest
+      - name: Basic runtime optimization unit tests
+        run: python tools/test_runtime_optimizations.py
       - name: Gate 4 source-isolated A/B aggregate with endpoint evidence
         run: python -m interop.gate4_harness --out-dir "$RUNNER_TEMP/mpx4-gate4"
       - name: Ensure generated files are committed
