@@ -11,6 +11,7 @@ SESSION_CLOSE.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import hashlib
 import hmac
 import json
@@ -645,6 +646,79 @@ class Trace:
 
 
 @dataclass
+class SegmentStore:
+    """Sorted, non-overlapping receive fragments.
+
+    DATA can arrive out of order and may overlap an earlier fragment.  Keeping
+    fragments disjoint means each incoming frame only compares against the
+    intervals it actually intersects, instead of scanning every queued frame.
+    Removed prefix entries stay as tombstones until the list is compacted so
+    delivering a long stream does not repeatedly shift the whole list.
+    """
+
+    _segments: Dict[int, bytes] = field(default_factory=dict)
+    _starts: List[int] = field(default_factory=list)
+    _head: int = 0
+
+    def _compact(self) -> None:
+        if self._head and self._head * 2 >= len(self._starts):
+            self._starts = self._starts[self._head :]
+            self._head = 0
+
+    def _add_gap(self, start: int, data: bytes) -> None:
+        if not data:
+            return
+        index = bisect.bisect_left(self._starts, start, lo=self._head)
+        self._segments[start] = data
+        self._starts.insert(index, start)
+
+    def insert(self, start: int, data: bytes) -> None:
+        """Insert a fragment, rejecting conflicting overlapping bytes."""
+        if not data:
+            return
+        end = start + len(data)
+        index = bisect.bisect_left(self._starts, start, lo=self._head)
+        if index > self._head:
+            previous_start = self._starts[index - 1]
+            if previous_start + len(self._segments[previous_start]) > start:
+                index -= 1
+        cursor = start
+        gaps: List[Tuple[int, int]] = []
+        while index < len(self._starts):
+            old_start = self._starts[index]
+            old_data = self._segments[old_start]
+            old_end = old_start + len(old_data)
+            if old_start >= end:
+                break
+            if old_end <= start:
+                index += 1
+                continue
+            overlap_start = max(start, old_start)
+            overlap_end = min(end, old_end)
+            incoming = data[overlap_start - start : overlap_end - start]
+            existing = old_data[overlap_start - old_start : overlap_end - old_start]
+            if incoming != existing:
+                raise ProtocolError("conflicting overlapping Stream bytes")
+            if cursor < overlap_start:
+                gaps.append((cursor, overlap_start))
+            cursor = max(cursor, overlap_end)
+            index += 1
+        if cursor < end:
+            gaps.append((cursor, end))
+        for gap_start, gap_end in gaps:
+            self._add_gap(gap_start, data[gap_start - start : gap_end - start])
+
+    def pop_contiguous(self, offset: int) -> Optional[bytes]:
+        if self._head >= len(self._starts) or self._starts[self._head] != offset:
+            return None
+        start = self._starts[self._head]
+        data = self._segments.pop(start)
+        self._head += 1
+        self._compact()
+        return data
+
+
+@dataclass
 class StreamState:
     stream_id: int
     peer_consumed: int = 0
@@ -656,7 +730,7 @@ class StreamState:
     recv_final: Optional[int] = None
     send_final: Optional[int] = None
     recv_data: bytearray = field(default_factory=bytearray)
-    recv_segments: Dict[int, bytes] = field(default_factory=dict)
+    recv_segments: SegmentStore = field(default_factory=SegmentStore)
     open_event: asyncio.Event = field(default_factory=asyncio.Event)
     credit_event: asyncio.Event = field(default_factory=asyncio.Event)
     recv_done_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -723,6 +797,31 @@ class Carrier:
         else:
             self.writer.write(data)
             await self.writer.drain()
+
+    def max_stream_data_payload(self, stream_id: int, transmission_id: int, offset: int) -> int:
+        """Return the largest DATA payload that fits both peer limits."""
+        upper = min(self.peer_limits.max_frame_payload, 32768)
+        if upper < 1:
+            raise ProtocolError("peer MAX_FRAME_PAYLOAD is zero")
+
+        metadata_size = sum(len(vi_enc(value)) for value in (stream_id, offset, transmission_id))
+
+        def fits(size: int) -> bool:
+            body_size = metadata_size + size
+            return 1 + len(vi_enc(body_size)) + body_size <= self.peer_limits.max_record_size
+
+        if fits(upper):
+            return upper
+        low, high = 1, upper
+        while low < high:
+            middle = (low + high + 1) // 2
+            if fits(middle):
+                low = middle
+            else:
+                high = middle - 1
+        if not fits(low):
+            raise ProtocolError("peer MAX_RECORD_SIZE cannot carry STREAM_DATA")
+        return low
 
     async def send_frame(self, frame_type: int, **fields: object) -> None:
         body = frame_body(frame_type, **fields)
@@ -865,6 +964,9 @@ class ReferenceSession:
         self.streams: Dict[int, StreamState] = {}
         self.next_txid = 1
         self.outstanding: Dict[int, Outstanding] = {}
+        self.settled: Dict[int, Tuple[int, int]] = {}
+        self.peer_open_tx: Dict[int, int] = {}
+        self.stream_open_tx: Dict[int, int] = {}
         self.session_peer_consumed = 0
         self.session_peer_maximum = 0
         self.session_send_committed = 0
@@ -907,11 +1009,15 @@ class ReferenceSession:
     def settle_tx(self, txid: int, expected_frame: Optional[int] = None) -> None:
         item = self.outstanding.get(txid)
         if item is None:
+            prior = self.settled.get(txid)
+            if prior is not None and (expected_frame is None or prior[1] == expected_frame):
+                return
             raise TransmissionError(f"ACK for unknown Transmission {txid}")
         if expected_frame is not None and item.frame_type != expected_frame:
             raise TransmissionError("wrong confirmation class")
         item.event.set()
         del self.outstanding[txid]
+        self.settled[txid] = (item.stream_id, item.frame_type)
 
     async def send_initial_session_credit(self) -> None:
         await self.carrier.send_frame(
@@ -988,14 +1094,36 @@ class ReferenceSession:
                 raise ProtocolError("Server-only STREAM_OPEN received by client")
             stream_id = int(fields["stream_id"])
             txid = int(fields["transmission_id"])
-            if stream_id <= 0 or stream_id % 2 == 0:
+            prior_stream = self.peer_open_tx.get(txid)
+            if prior_stream is not None:
+                if prior_stream != stream_id:
+                    raise TransmissionError("STREAM_OPEN Transmission identity mismatch")
+                if stream_id not in self.streams:
+                    raise TransmissionError("STREAM_OPEN replay has no Stream")
+                await self.carrier.send_frame(
+                    FRAME_STREAM_OPEN_OK,
+                    stream_id=stream_id,
+                    transmission_id=txid,
+                )
+                self.trace.emit(
+                    "frame_send",
+                    **self.carrier.base_trace(),
+                    frame_type="STREAM_OPEN_OK",
+                    stream_id=stream_id,
+                    transmission_id=txid,
+                )
+                return
+            prior_txid = self.stream_open_tx.get(stream_id)
+            if prior_txid is not None and prior_txid != txid:
+                raise TransmissionError("STREAM_OPEN Stream identity mismatch")
+            if stream_id <= 0 or stream_id % 2 == 0 or stream_id in self.streams:
                 raise ProtocolError("invalid client Stream ID")
             if len(self.streams) >= self.carrier.local_limits.max_streams:
                 raise ProtocolError("reference Gate 1 stream limit exceeded")
-            if stream_id in self.streams:
-                raise ProtocolError("duplicate STREAM_OPEN not implemented in Gate 1")
             stream = StreamState(stream_id=stream_id)
             self.streams[stream_id] = stream
+            self.peer_open_tx[txid] = stream_id
+            self.stream_open_tx[stream_id] = txid
             if len(self.streams) == self.stream_count:
                 self.streams_ready_event.set()
             await self.carrier.send_frame(
@@ -1024,7 +1152,13 @@ class ReferenceSession:
             if stream is None:
                 raise TransmissionError("OPEN_OK for unknown Stream")
             item = self.outstanding.get(txid)
-            if item is None or item.frame_type != FRAME_STREAM_OPEN or item.stream_id != stream_id:
+            if item is None:
+                prior = self.settled.get(txid)
+                if prior != (stream_id, FRAME_STREAM_OPEN):
+                    raise TransmissionError("OPEN_OK identity mismatch")
+                stream.open_event.set()
+                return
+            if item.frame_type != FRAME_STREAM_OPEN or item.stream_id != stream_id:
                 raise TransmissionError("OPEN_OK identity mismatch")
             self.settle_tx(txid, FRAME_STREAM_OPEN)
             stream.open_event.set()
@@ -1056,7 +1190,12 @@ class ReferenceSession:
             txid = int(fields["transmission_id"])
             stream_id = int(fields["stream_id"])
             item = self.outstanding.get(txid)
-            if item is None or item.stream_id != stream_id:
+            if item is None:
+                prior = self.settled.get(txid)
+                if prior is None or prior[0] != stream_id or prior[1] not in (FRAME_STREAM_DATA, FRAME_STREAM_FIN):
+                    raise TransmissionError("TRANSMISSION_ACK identity mismatch")
+                return
+            if item.stream_id != stream_id:
                 raise TransmissionError("TRANSMISSION_ACK identity mismatch")
             if item.frame_type not in (FRAME_STREAM_DATA, FRAME_STREAM_FIN):
                 raise TransmissionError("TRANSMISSION_ACK wrong confirmation class")
@@ -1109,12 +1248,20 @@ class ReferenceSession:
 
         self.first_data_received_event.set()
 
-        existing = stream.recv_segments.get(offset)
-        if existing is not None and existing != data:
-            raise ProtocolError("conflicting duplicate STREAM_DATA")
-        stream.recv_segments[offset] = data
-        while stream.recv_next in stream.recv_segments:
-            chunk = stream.recv_segments.pop(stream.recv_next)
+        if offset < stream.recv_next:
+            committed_end = min(end, stream.recv_next)
+            if bytes(stream.recv_data[offset:committed_end]) != data[: committed_end - offset]:
+                raise ProtocolError("conflicting duplicate STREAM_DATA")
+            if end <= stream.recv_next:
+                data = b""
+            else:
+                data = data[stream.recv_next - offset :]
+                offset = stream.recv_next
+        stream.recv_segments.insert(offset, data)
+        while True:
+            chunk = stream.recv_segments.pop_contiguous(stream.recv_next)
+            if chunk is None:
+                break
             stream.recv_data.extend(chunk)
             stream.recv_next += len(chunk)
             self.rx_application_bytes += len(chunk)
@@ -1217,8 +1364,8 @@ class ReferenceSession:
         offset = 0
         chunk_index = 0
         ack_events: List[asyncio.Event] = []
-        chunk_size = min(self.carrier.peer_limits.max_frame_payload, 32768)
         while offset < len(payload):
+            chunk_size = self.carrier.max_stream_data_payload(stream.stream_id, self.next_txid, offset)
             chunk = payload[offset : offset + chunk_size]
             end = offset + len(chunk)
             if end > stream.peer_maximum:
